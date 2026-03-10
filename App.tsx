@@ -4,7 +4,7 @@ import { saveOfflineData, getOfflineData } from "./src/utils/offlineStorage";
 import { useOnlineStatus } from "./src/hooks/useOnlineStatus";
 import { subscribeToPush, unsubscribeFromPush } from "./src/pwa/push";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
   Calendar, 
@@ -83,6 +83,8 @@ const App: React.FC = () => {
   const [todayStudentBirthdays, setTodayStudentBirthdays] = useState<StudentBirthdayInfo[]>([]);
   const [showStudentBirthdayPopup, setShowStudentBirthdayPopup] = useState(false);
   const isOnline = useOnlineStatus();
+  const wasOnlineRef = useRef(isOnline);
+  const lastRefreshRef = useRef(0);
   const blockIfOffline = (actionLabel = "realizar esta acción") => {
     if (isOnline) return false;
 
@@ -90,7 +92,22 @@ const App: React.FC = () => {
     return true;
   };
 
+  const refreshBaseData = async () => {
+    if (!currentUser) return;
+    if (!isOnline) return;
 
+    const now = Date.now();
+    if (now - lastRefreshRef.current < 3000) return;
+
+    lastRefreshRef.current = now;
+
+    try {
+      await loadSchoolNames();
+      await loadBaseData(currentUser);
+    } catch (error) {
+      console.error("Error refrescando datos base:", error);
+    }
+  };
   useEffect(() => {
     const boot = async () => {
       const { data } = await supabase.auth.getSession();
@@ -208,6 +225,36 @@ const App: React.FC = () => {
 
     void run();
   }, [currentUser, baseDataLoaded]);
+
+  useEffect(() => {
+    const cameBackOnline = !wasOnlineRef.current && isOnline;
+
+    if (cameBackOnline) {
+      void refreshBaseData();
+    }
+
+    wasOnlineRef.current = isOnline;
+  }, [isOnline, currentUser]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshBaseData();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void refreshBaseData();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, [currentUser, isOnline]);
 
 
   const loadSchoolNames = async () => {
@@ -1947,16 +1994,6 @@ const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string |
                       : "Activar"}
                 </button>
               </div>
-            </div>
-
-            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-700">
-              <div>secureContext: {String(window.isSecureContext)}</div>
-              <div>display-mode standalone: {String(window.matchMedia?.("(display-mode: standalone)")?.matches)}</div>
-              <div>navigator.standalone: {String((navigator as any).standalone ?? false)}</div>
-              <div>serviceWorker in navigator: {String("serviceWorker" in navigator)}</div>
-              <div>PushManager in window: {String("PushManager" in window)}</div>
-              <div>Notification in window: {String("Notification" in window)}</div>
-              <div>notification permission: {typeof Notification !== "undefined" ? Notification.permission : "n/a"}</div>
             </div>
           </div>
           <div className="mt-6 p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
