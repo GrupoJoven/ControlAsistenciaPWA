@@ -44,6 +44,7 @@ interface CatechistManagerProps {
 
   // Para pintar tarjetas y abrir detalle con grupos actuales:
   getUserGroupIds: (userId: string) => string[];  // lo construyes en App con groupCatechistLinks
+  isOnline: boolean;
 }
 
 
@@ -59,6 +60,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
   onSetUserGroups,
   onRemoveUser,
   getUserGroupIds,
+  isOnline,
 }) => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -174,19 +176,28 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     setIsEditing(false);
 
     // Cargar histórico desde BD
+    if (!isOnline) {
+      setTempHistory(user.attendanceHistory ?? []);
+      return;
+    }
+
     setIsLoadingHistory(true);
     try {
       const full = await loadFullHistoryFromDB(user.id);
       setTempHistory(full);
     } catch (e: any) {
       alert("Error cargando histórico: " + (e?.message ?? String(e)));
-      setTempHistory([]); // evita estado raro
+      setTempHistory(user.attendanceHistory ?? []);
     } finally {
       setIsLoadingHistory(false);
     }
   };
 
   const handleSave = async () => {
+  if (!isOnline) {
+    alert("No hay conexión. No se pueden guardar cambios del catequista hasta que vuelva internet.");
+    return;
+  }
     if (isAdding) {
       if (!email.trim()) { alert("Email obligatorio."); return; }
       if (!password || password.length < 8) { alert("La contraseña debe tener al menos 8 caracteres."); return; }
@@ -259,6 +270,11 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
 
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  if (!isOnline) {
+    alert("No hay conexión. No se puede subir la foto hasta que vuelva internet.");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    return;
+  }
     try {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -348,6 +364,10 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
   };
 
   const handlePhotoDelete = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede eliminar la foto hasta que vuelva internet.");
+      return;
+    }
     if (!selectedUser?.id) return;
 
     if (!photo) {
@@ -473,13 +493,18 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     <div className="space-y-6">
       <div className="flex justify-end">
         <button 
+          disabled={!isOnline}
           onClick={() => {
             setIsAdding(true);
             setIsEditing(true);
             setName(''); setEmail(''); setPassword(''); setBirthDate('');
             setPhoto(undefined); setSelectedGroupIds([]); setTempHistory([]);
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow-sm"
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold shadow-sm ${
+            isOnline
+              ? "bg-indigo-600 text-white"
+              : "bg-slate-200 text-slate-500 cursor-not-allowed"
+          }`}
         >
           <UserPlus size={18} /> <span className="hidden sm:inline">Añadir Catequista</span><span className="sm:hidden">Nuevo</span>
         </button>
@@ -610,6 +635,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
                     {isEditing && (
                       <button
                         type="button"
+                        disabled={!isOnline}
                         onClick={async () => {
                           if (!selectedUser) return;
                           if (!password || password.length < 8) {
@@ -619,7 +645,11 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
                           await onResetPassword(selectedUser.id, password);
                           setPassword("");
                         }}
-                        className="mt-2 w-full py-2 bg-slate-900 text-white font-bold rounded-xl"
+                        className={`mt-2 w-full py-2 font-bold rounded-xl ${
+                          isOnline
+                            ? "bg-slate-900 text-white"
+                            : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                        }`}
                       >
                         Resetear contraseña
                       </button>
@@ -730,10 +760,32 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
 
             <div className="pt-6 border-t flex flex-col gap-3 pb-8">
               {(isEditing || isAdding) && (
-                <button onClick={handleSave} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all text-sm"><Save size={18} /> {isAdding ? 'Inscribir' : 'Guardar'}</button>
+                <button
+                  onClick={handleSave}
+                  disabled={!isOnline}
+                  className={`w-full py-3 font-bold rounded-2xl flex items-center justify-center gap-2 text-sm ${
+                    isOnline
+                      ? "bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 transition-all"
+                      : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                  }`}
+                ><Save size={18} /> {isAdding ? 'Inscribir' : 'Guardar'}
+                </button>
               )}
               {!isAdding && selectedUser && isEditing && (
-                <button onClick={() => { if(confirm('¿Deseas eliminar a este catequista?')) { onRemoveUser(selectedUser.id); resetForm(); }}} className="w-full py-3 bg-red-50 text-red-600 font-bold rounded-2xl border border-red-100 flex items-center justify-center gap-2 hover:bg-red-100 transition-all text-sm"><Trash2 size={18} /> Eliminar</button>
+                <button
+                  disabled={!isOnline}
+                  onClick={() => {
+                    if (confirm('¿Deseas eliminar a este catequista?')) {
+                      onRemoveUser(selectedUser.id);
+                      resetForm();
+                    }
+                  }}
+                  className={`w-full py-3 font-bold rounded-2xl border flex items-center justify-center gap-2 text-sm ${
+                    isOnline
+                      ? "bg-red-50 text-red-600 border-red-100 hover:bg-red-100 transition-all"
+                      : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                  }`}
+                ><Trash2 size={18} /> Eliminar</button>
               )}
             </div>
           </div>

@@ -1,5 +1,8 @@
 
 import { supabase } from "./src/lib/supabaseClient";
+import { saveOfflineData, getOfflineData } from "./src/utils/offlineStorage";
+import { useOnlineStatus } from "./src/hooks/useOnlineStatus";
+import { subscribeToPush, unsubscribeFromPush } from "./src/pwa/push";
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
@@ -21,6 +24,8 @@ import {
   Menu,
   ClipboardList,
   TriangleAlert,
+  Bell,
+  BellOff,
   X
 } from 'lucide-react';
 import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, AttendanceStatus, CatechistAttendanceRecord } from './types';
@@ -77,6 +82,13 @@ const App: React.FC = () => {
 
   const [todayStudentBirthdays, setTodayStudentBirthdays] = useState<StudentBirthdayInfo[]>([]);
   const [showStudentBirthdayPopup, setShowStudentBirthdayPopup] = useState(false);
+  const isOnline = useOnlineStatus();
+  const blockIfOffline = (actionLabel = "realizar esta acción") => {
+    if (isOnline) return false;
+
+    alert(`No hay conexión. No se puede ${actionLabel} hasta que vuelva internet.`);
+    return true;
+  };
 
 
   useEffect(() => {
@@ -85,21 +97,45 @@ const App: React.FC = () => {
       const sessionUser = data.session?.user;
       if (!sessionUser) return;
 
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("id, name, role, birth_date")
-        .eq("id", sessionUser.id)
-        .single();
+      let appUser: User | null = null;
 
-      if (error || !profile) return;
+      try {
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("id, name, role, birth_date")
+          .eq("id", sessionUser.id)
+          .single();
 
-      const appUser: User = {
-        id: profile.id,
-        name: profile.name ?? "",
-        email: sessionUser.email ?? "",
-        role: profile.role,
-        birthDate: profile.birth_date ? String(profile.birth_date) : "",
-      };
+        if (error || !profile) {
+          throw error ?? new Error("Perfil no encontrado");
+        }
+
+        appUser = {
+          id: profile.id,
+          name: profile.name ?? "",
+          email: sessionUser.email ?? "",
+          role: profile.role,
+          birthDate: profile.birth_date ? String(profile.birth_date) : "",
+        };
+
+        await saveOfflineData("currentUser", appUser);
+
+      } catch (error) {
+        console.warn("No se pudo cargar el perfil desde Supabase, intentando usar currentUser offline");
+
+        const cachedUser = await getOfflineData<User>("currentUser");
+
+        if (!cachedUser?.data) return;
+
+        if (cachedUser.data.id !== sessionUser.id) return;
+
+        appUser = {
+          ...cachedUser.data,
+          email: sessionUser.email ?? cachedUser.data.email ?? "",
+        };
+      }
+
+      if (!appUser) return;
 
       setCurrentUser(appUser);
       await loadSchoolNames();
@@ -175,18 +211,25 @@ const App: React.FC = () => {
 
 
   const loadSchoolNames = async () => {
-    const { data, error } = await supabase
-      .from("school_names")
-      .select("id, name")
-      .order("name", { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from("school_names")
+        .select("id, name")
+        .order("name", { ascending: true });
 
-    if (error) {
-      console.error("Error cargando colegios:", error.message);
-      setSchoolNames([]);
-      return;
+      if (error) throw error;
+
+      const mapped = data ?? [];
+      await saveOfflineData("schoolNames", mapped);
+      setSchoolNames(mapped);
+    } catch (error) {
+      console.warn("No se pudieron cargar schoolNames desde Supabase, intentando offline", error);
+
+      const cached = await getOfflineData<SchoolName[]>("schoolNames");
+      setSchoolNames(cached?.data ?? []);
     }
-    setSchoolNames(data ?? []);
   };
+
   const handleLogin = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -223,9 +266,11 @@ const App: React.FC = () => {
       name: profile.name ?? "",
       email: data.user?.email ?? email,
       role: profile.role,
+      birthDate: profile.birth_date ? String(profile.birth_date) : "",
     };
   
     try {
+      await saveOfflineData("currentUser", appUser);
       setCurrentUser(appUser);
       await loadSchoolNames();
       await loadBaseData(appUser);
@@ -254,52 +299,80 @@ const App: React.FC = () => {
       if (error || !data?.signedUrl) return "";
       return data.signedUrl;
     };
-    // --- groups ---
-    const { data: groupsData, error: groupsErr } = await supabase
-      .from("groups")
-      .select("id, name")
-      .order("name", { ascending: true });
-    if (groupsErr) throw new Error("groups: " + groupsErr.message);
+    // --- groups + group_catechist ---
+    let groupsMapped: Group[] = [];
+    let links: GroupCatechistLink[] = [];
 
-    const { data: linksData, error: linksErr } = await supabase
-      .from("group_catechist")
-      .select("group_id, profile_id");
+    try {
+      const { data: groupsData, error: groupsErr } = await supabase
+        .from("groups")
+        .select("id, name")
+        .order("name", { ascending: true });
 
-    if (linksErr) throw new Error("group_catechist: " + linksErr.message);
+      if (groupsErr) throw groupsErr;
 
-    const links = (linksData ?? []) as GroupCatechistLink[];
+      const { data: linksData, error: linksErr } = await supabase
+        .from("group_catechist")
+        .select("group_id, profile_id");
+
+      if (linksErr) throw linksErr;
+
+      groupsMapped = (groupsData ?? []).map(g => ({
+        id: g.id,
+        name: g.name,
+        catechistIds: [],
+      }));
+
+      links = (linksData ?? []) as GroupCatechistLink[];
+
+      await saveOfflineData("groups", groupsMapped);
+      await saveOfflineData("groupCatechistLinks", links);
+
+    } catch (error) {
+      console.warn("No se pudieron cargar groups/group_catechist desde Supabase, intentando offline", error);
+
+      const cachedGroups = await getOfflineData<Group[]>("groups");
+      const cachedLinks = await getOfflineData<GroupCatechistLink[]>("groupCatechistLinks");
+
+      groupsMapped = cachedGroups?.data ?? [];
+      links = cachedLinks?.data ?? [];
+    }
+
     setGroupCatechistLinks(links);
-
-    const groupsMapped: Group[] = (groupsData ?? []).map(g => ({
-      id: g.id,
-      name: g.name,
-      catechistIds: [], // si luego lo quieres rellenar, lo hacemos con profiles
-    }));
     setGroups(groupsMapped);
 
     const myGroupIds = links
       .filter(l => l.profile_id === user.id)
       .map(l => l.group_id);
 
-    // si todavía no hay activeGroupId o ya no existe, elige el primero
     setActiveGroupId(prev => (prev && myGroupIds.includes(prev) ? prev : (myGroupIds[0] ?? null)));
+    // --- profiles (users base) ---
+    let usersMapped: User[] = [];
 
-    // --- profiles (users) ---
-    const { data: profData, error: profErr } = await supabase
-      .from("profiles")
-      .select("id, name, email, role, birth_date, photo_path")
-      .order("name", { ascending: true });
-    if (profErr) throw new Error("profiles: " + profErr.message);
+    try {
+      const { data: profData, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, name, email, role, birth_date, photo_path")
+        .order("name", { ascending: true });
 
-    const usersMapped: User[] = await Promise.all((profData ?? []).map(async (p: any) => ({
-      id: p.id,
-      name: p.name ?? "",
-      email: p.email ?? "",
-      role: p.role,
-      birthDate: p.birth_date ? String(p.birth_date).slice(0, 10) : "",
-      photo: await signMediaUrl(p.photo_path), // aquí va la URL firmada
-      attendanceHistory: [],
-    })));
+      if (profErr) throw profErr;
+
+      usersMapped = await Promise.all((profData ?? []).map(async (p: any) => ({
+        id: p.id,
+        name: p.name ?? "",
+        email: p.email ?? "",
+        role: p.role,
+        birthDate: p.birth_date ? String(p.birth_date).slice(0, 10) : "",
+        photo: await signMediaUrl(p.photo_path),
+        attendanceHistory: [],
+      })));
+
+    } catch (error) {
+      console.warn("No se pudieron cargar profiles desde Supabase, intentando offline", error);
+
+      const cached = await getOfflineData<User[]>("users");
+      usersMapped = cached?.data ?? [];
+    }
 
 
     // --- lista mínima de usuarios para filtros de incidencias ---
@@ -339,132 +412,195 @@ const App: React.FC = () => {
       ? usersMapped
       : usersMapped.filter(u => u.id === user.id);
 
-    // --- students ---
-    const { data: studentsData, error: studentsErr } = await supabase
-      .from("students")
-      .select("id, name, email, parent_email, school, birth_date, group_id, photo_path");
-    if (studentsErr) throw new Error("students: " + studentsErr.message);
+    // --- students + student_attendance ---
+    let studentsMapped: Student[] = [];
 
-    // --- student_attendance ---
-    let all: any[] = [];
-    let from = 0;
-    const pageSize = 1000;
-    
-    while (true) {
-      const { data, error } = await supabase
-        .from("student_attendance")
-        .select("student_id, date, catechism, mass")
-        .order("student_id", { ascending: true })
-        .order("date", { ascending: true })
-        .range(from, from + pageSize - 1);
-    
-      if (error) throw new Error("student_attendance: " + error.message);
-      if (!data || data.length === 0) break;
-    
-      all = all.concat(data);
-      if (data.length < pageSize) break;
-    
-      from += pageSize;
+    try {
+      const { data: studentsData, error: studentsErr } = await supabase
+        .from("students")
+        .select("id, name, email, parent_email, school, birth_date, group_id, photo_path");
+
+      if (studentsErr) throw studentsErr;
+
+      let all: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("student_attendance")
+          .select("student_id, date, catechism, mass")
+          .order("student_id", { ascending: true })
+          .order("date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        all = all.concat(data);
+        if (data.length < pageSize) break;
+
+        from += pageSize;
+      }
+
+      const attendanceByStudent = new Map<string, AttendanceRecord[]>();
+
+      for (const r of all ?? []) {
+        const rec: AttendanceRecord = {
+          date: String(r.date),
+          catechism: r.catechism as any,
+          mass: r.mass as any,
+        };
+
+        const arr = attendanceByStudent.get(r.student_id) ?? [];
+        arr.push(rec);
+        attendanceByStudent.set(r.student_id, arr);
+      }
+
+      studentsMapped = await Promise.all(
+        (studentsData ?? []).map(async (s: any) => ({
+          id: s.id,
+          name: s.name,
+          email: s.email ?? "",
+          parentEmail: s.parent_email ?? "",
+          school: s.school ?? null,
+          birthDate: s.birth_date ? String(s.birth_date).slice(0, 10) : "",
+          groupId: s.group_id ?? "",
+          photo: await signMediaUrl(s.photo_path),
+          attendanceHistory: attendanceByStudent.get(s.id) ?? [],
+        }))
+      );
+
+      await saveOfflineData("students", studentsMapped);
+
+    } catch (error) {
+      console.warn("No se pudieron cargar students/student_attendance desde Supabase, intentando offline", error);
+
+      const cached = await getOfflineData<Student[]>("students");
+      studentsMapped = cached?.data ?? [];
     }
-    
-    const studAttData = all;
-
-    const attendanceByStudent = new Map<string, AttendanceRecord[]>();
-    for (const r of studAttData ?? []) {
-      const rec: AttendanceRecord = {
-        date: String(r.date),
-        catechism: r.catechism as any,
-        mass: r.mass as any,
-      };
-      const arr = attendanceByStudent.get(r.student_id) ?? [];
-      arr.push(rec);
-      attendanceByStudent.set(r.student_id, arr);
-    }
-
-    const studentsMapped: Student[] = await Promise.all((studentsData ?? []).map(async (s: any) => ({
-      id: s.id,
-      name: s.name,
-      email: s.email ?? "",
-      parentEmail: s.parent_email ?? "",
-      school: s.school ?? null,
-      birthDate: s.birth_date ? String(s.birth_date).slice(0, 10) : "",
-      groupId: s.group_id ?? "",
-      photo: await signMediaUrl(s.photo_path),
-      attendanceHistory: attendanceByStudent.get(s.id) ?? [],
-    })));
 
     setStudents(studentsMapped);
 
     // --- parish_events ---
-    const { data: eventsData, error: eventsErr } = await supabase
-      .from("parish_events")
-      .select("id, title, date")
-      .order("date", { ascending: true });
-    if (eventsErr) throw new Error("parish_events: " + eventsErr.message);
+    let eventsMapped: ParishEvent[] = [];
 
-    setEvents((eventsData ?? []).map(e => ({
-      id: e.id,
-      title: e.title,
-      date: String(e.date),
-    })));
+    try {
+      const { data: eventsData, error: eventsErr } = await supabase
+        .from("parish_events")
+        .select("id, title, date")
+        .order("date", { ascending: true });
+
+      if (eventsErr) throw eventsErr;
+
+      eventsMapped = (eventsData ?? []).map(e => ({
+        id: e.id,
+        title: e.title,
+        date: String(e.date),
+      }));
+
+      // guardar copia offline
+      await saveOfflineData("parishEvents", eventsMapped);
+
+    } catch (error) {
+      console.warn("No se pudieron cargar eventos desde Supabase, intentando offline");
+
+      const cached = await getOfflineData<ParishEvent[]>("parishEvents");
+
+      if (cached?.data) {
+        eventsMapped = cached.data;
+      } else {
+        eventsMapped = [];
+      }
+    }
+
+    setEvents(eventsMapped);
 
     // --- class_days ---
-    const { data: classDaysData, error: classDaysErr } = await supabase
-      .from("class_days")
-      .select("date")
-      .order("date", { ascending: true });
-    if (classDaysErr) throw new Error("class_days: " + classDaysErr.message);
+    let classDaysMapped: string[] = [];
 
-    setClassDays((classDaysData ?? []).map(d => String(d.date)));
+    try {
+      const { data: classDaysData, error: classDaysErr } = await supabase
+        .from("class_days")
+        .select("date")
+        .order("date", { ascending: true });
 
-    // --- catechist_attendance (clase: catechism/mass) ---
+      if (classDaysErr) throw classDaysErr;
+
+      classDaysMapped = (classDaysData ?? []).map(d => String(d.date));
+      await saveOfflineData("classDays", classDaysMapped);
+
+    } catch (error) {
+      console.warn("No se pudieron cargar classDays desde Supabase, intentando offline", error);
+
+      const cached = await getOfflineData<string[]>("classDays");
+      classDaysMapped = cached?.data ?? [];
+    }
+
+    setClassDays(classDaysMapped);
+
+    // --- catechist_attendance + users final ---
     const today = getTodayStr();
-    // Usa la vista normalizada (NULL => absent)
-    const { data: catClassData, error: catClassErr } = await supabase
-      .from("v_catechist_attendance_norm")
-      .select("profile_id, date, catechism, mass");
+    let usersWithAttendance: User[] = [];
 
-    if (catClassErr) throw new Error("v_catechist_attendance_norm: " + catClassErr.message);
+    try {
+      const { data: catClassData, error: catClassErr } = await supabase
+        .from("v_catechist_attendance_norm")
+        .select("profile_id, date, catechism, mass");
 
-    // --- catechist_attendance_events (eventos) ---
-    const { data: catEventData, error: catEventErr } = await supabase
-      .from("catechist_attendance_events")
-      .select("profile_id, event_id, date, status")
-      .eq("date", today);
+      if (catClassErr) throw catClassErr;
 
-    if (catEventErr) throw new Error("catechist_attendance_events: " + catEventErr.message);
+      const { data: catEventData, error: catEventErr } = await supabase
+        .from("catechist_attendance_events")
+        .select("profile_id, event_id, date, status")
+        .eq("date", today);
 
-    // Construir attendanceHistory en el shape que espera la UI
-    const catAttendanceByProfile = new Map<string, CatechistAttendanceRecord[]>();
+      if (catEventErr) throw catEventErr;
 
-    for (const r of catClassData ?? []) {
-      const rec: CatechistAttendanceRecord = {
-        type: "class" as any,
-        date: String(r.date),
-        catechism: (r.catechism ?? "absent") as any,
-        mass: (r.mass ?? "absent") as any,
-      };
-      const arr = catAttendanceByProfile.get(r.profile_id) ?? [];
-      arr.push(rec);
-      catAttendanceByProfile.set(r.profile_id, arr);
+      const catAttendanceByProfile = new Map<string, CatechistAttendanceRecord[]>();
+
+      for (const r of catClassData ?? []) {
+        const rec: CatechistAttendanceRecord = {
+          type: "class" as any,
+          date: String(r.date),
+          catechism: (r.catechism ?? "absent") as any,
+          mass: (r.mass ?? "absent") as any,
+        };
+        const arr = catAttendanceByProfile.get(r.profile_id) ?? [];
+        arr.push(rec);
+        catAttendanceByProfile.set(r.profile_id, arr);
+      }
+
+      for (const r of catEventData ?? []) {
+        const rec: CatechistAttendanceRecord = {
+          type: "event" as any,
+          refId: r.event_id,
+          date: String(r.date),
+          status: (r.status ?? "absent") as any,
+        };
+        const arr = catAttendanceByProfile.get(r.profile_id) ?? [];
+        arr.push(rec);
+        catAttendanceByProfile.set(r.profile_id, arr);
+      }
+
+      usersWithAttendance = usersScoped.map(u => ({
+        ...u,
+        attendanceHistory: catAttendanceByProfile.get(u.id) ?? [],
+      }));
+
+      await saveOfflineData("users", usersWithAttendance);
+
+    } catch (error) {
+      console.warn("No se pudo cargar la asistencia de catequistas desde Supabase, intentando offline", error);
+
+      const cachedUsers = await getOfflineData<User[]>("users");
+
+      if (cachedUsers?.data?.length) {
+        usersWithAttendance = cachedUsers.data;
+      } else {
+        usersWithAttendance = usersScoped;
+      }
     }
-
-    for (const r of catEventData ?? []) {
-      const rec: CatechistAttendanceRecord = {
-        type: "event" as any,
-        refId: r.event_id,
-        date: String(r.date),
-        status: (r.status ?? "absent") as any,
-      };
-      const arr = catAttendanceByProfile.get(r.profile_id) ?? [];
-      arr.push(rec);
-      catAttendanceByProfile.set(r.profile_id, arr);
-    }
-
-    const usersWithAttendance = usersScoped.map(u => ({
-      ...u,
-      attendanceHistory: catAttendanceByProfile.get(u.id) ?? [],
-    }));
 
     setUsers(usersWithAttendance);
     setBaseDataLoaded(true);
@@ -499,6 +635,7 @@ const App: React.FC = () => {
     type: "catechism" | "mass",
     status: AttendanceStatus
   ) => {
+    if (blockIfOffline("guardar la asistencia")) return;
     const today = getTodayStr();
   
     // 1) Lee desde Supabase el registro actual (fuente de verdad)
@@ -553,6 +690,7 @@ const App: React.FC = () => {
     refId?: string,
     subType?: "catechism" | "mass"
   ) => {
+    if (blockIfOffline("guardar la asistencia del catequista")) return;
     const today = getTodayStr();
     const safeStatus = normalizeTeamStatus(status);
 
@@ -656,6 +794,7 @@ const App: React.FC = () => {
 
 
   const setUserGroups = async (userId: string, groupIds: string[]) => {
+    if (blockIfOffline("actualizar los grupos del catequista")) return;
     const current = getUserGroupIds(userId);
     const next = Array.from(new Set(groupIds)); // dedup
 
@@ -704,6 +843,7 @@ const App: React.FC = () => {
 
 
   const updateStudent = async (updatedStudent: Student) => {
+    if (blockIfOffline("actualizar el catecúmeno")) return;
     // 1) actualizar datos del alumno (students)
     const schoolNormalized =
       (updatedStudent.school ?? "").trim() || null;
@@ -772,6 +912,7 @@ const App: React.FC = () => {
 
 
   const addStudent = async (newStudent: Student) => {
+    if (blockIfOffline("crear el catecúmeno")) return;
     const schoolNormalized =
       (newStudent.school ?? "").trim() || null;
     const payload = {
@@ -810,6 +951,7 @@ const App: React.FC = () => {
   };
 
   const removeStudent = async (id: string) => {
+    if (blockIfOffline("eliminar el catecúmeno")) return;
     const { error } = await supabase.from("students").delete().eq("id", id);
 
     if (error) {
@@ -821,6 +963,7 @@ const App: React.FC = () => {
   };
 
   const updateUser = async (updatedUser: User) => {
+    if (blockIfOffline("actualizar el perfil")) return;
     const birth = updatedUser.birthDate?.slice(0, 10) || null;
 
     const payload = {
@@ -849,6 +992,7 @@ const App: React.FC = () => {
 
 
   const addUser = async (input: { name: string; email: string; password: string; birthDate?: string; groupIds: string[] }) => {
+    if (blockIfOffline("crear el catequista")) return;
     const payload = {
       email: input.email,
       password: input.password,
@@ -895,6 +1039,7 @@ const App: React.FC = () => {
 
 
   const removeUser = async (id: string) => {
+    if (blockIfOffline("eliminar el catequista")) return;
     const { data, error } = await supabase.functions.invoke("delete-user", {
       body: { userId: id },
     });
@@ -908,6 +1053,7 @@ const App: React.FC = () => {
   };
 
   const updateGroup = async (updatedGroup: Group) => {
+    if (blockIfOffline("actualizar el grupo")) return;
     const { data, error } = await supabase
       .from("groups")
       .update({ name: updatedGroup.name })
@@ -924,6 +1070,7 @@ const App: React.FC = () => {
   };
 
   const addGroup = async (name: string) => {
+    if (blockIfOffline("crear el grupo")) return;
     const { data, error } = await supabase
       .from("groups")
       .insert({ name })
@@ -940,6 +1087,7 @@ const App: React.FC = () => {
 
 
   const resetPassword = async (userId: string, newPassword: string) => {
+    if (blockIfOffline("resetear la contraseña")) return;
     const { error } = await supabase.functions.invoke("reset-password", {
       body: { userId, newPassword },
     });
@@ -954,6 +1102,7 @@ const App: React.FC = () => {
 
 
   const removeGroup = async (groupId: string) => {
+    if (blockIfOffline("eliminar el grupo")) return;
     const { count, error: countErr } = await supabase
       .from("students")
       .select("*", { count: "exact", head: true })
@@ -1031,10 +1180,39 @@ const App: React.FC = () => {
       return;
     }
 
-    setEvents(prev => [...prev, { id: data.id, title: data.title, date: String(data.date) }]);
+    const createdEvent = {
+      id: data.id,
+      title: data.title,
+      date: String(data.date),
+    };
+
+    setEvents(prev => [...prev, createdEvent]);
+
+    try {
+      const formattedDate = new Date(createdEvent.date).toLocaleDateString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+
+      const res = await supabase.functions.invoke("send-push-notifications", {
+        body: {
+          title: "Nuevo evento en la agenda",
+          body: `${createdEvent.title} · ${formattedDate}`,
+          url: "/",
+        },
+      });
+
+      if (res.error) {
+        console.error("Error enviando notificación push:", res.error);
+      }
+    } catch (e) {
+      console.error("Error inesperado enviando push:", e);
+    }
   };
 
   const setCatechistInGroup = async (profileId: string, groupId: string, assign: boolean) => {
+    if (blockIfOffline(assign ? "asignar el catequista al grupo" : "desasignar el catequista del grupo")) return;
     if (assign) {
       const { error } = await supabase
         .from("group_catechist")
@@ -1061,6 +1239,7 @@ const App: React.FC = () => {
   };
 
   const removeEvent = async (id: string) => {
+    if (blockIfOffline("eliminar el evento")) return;
     const { error } = await supabase
       .from("parish_events")
       .delete()
@@ -1075,6 +1254,7 @@ const App: React.FC = () => {
   };
 
   const toggleClassDay = async (date: string) => {
+    if (blockIfOffline("modificar el calendario lectivo")) return;
     const exists = classDays.includes(date);
 
     if (!exists) {
@@ -1360,6 +1540,20 @@ const App: React.FC = () => {
           </div>
         </header>
 
+        {!isOnline && (
+          <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm">
+            <div className="flex items-start gap-3">
+              <TriangleAlert size={18} className="mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p className="font-semibold">Modo sin conexión</p>
+                <p>
+                  Estás viendo los últimos datos guardados en este dispositivo. Algunos cambios no podrán guardarse hasta que vuelva la conexión.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-4 lg:p-8">
           {isSearchView && (
             <div className="sm:hidden mb-6 relative">
@@ -1376,6 +1570,7 @@ const App: React.FC = () => {
               classDays={classDays}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
+              isOnline={isOnline}
             />
           )}
           {currentView === 'school-calendar' && (
@@ -1390,6 +1585,7 @@ const App: React.FC = () => {
               users={incidentUsers}
               activeGroupId={activeGroupId}
               groupCatechistLinks={groupCatechistLinks}
+              isOnline={isOnline}
             />
           )}
 
@@ -1403,6 +1599,7 @@ const App: React.FC = () => {
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
               schoolNames={schoolNames}
+              isOnline={isOnline}
             />
           )}
           {currentView === 'services' && (
@@ -1411,6 +1608,7 @@ const App: React.FC = () => {
               students={myCatecumenos}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
+              isOnline={isOnline}
             />
           )}
 
@@ -1425,6 +1623,7 @@ const App: React.FC = () => {
               classDays={classDays}
               enableMassServices={true}
               schoolNames={schoolNames}
+              isOnline={isOnline}
             />
           )}
 
@@ -1441,6 +1640,7 @@ const App: React.FC = () => {
               classDays={classDays}
               events={events}
               onResetPassword={(uid, pw) => resetPassword(uid, pw)}
+              isOnline={isOnline}
             />
           )}
 
@@ -1479,22 +1679,39 @@ const App: React.FC = () => {
               events={events}
               activeGroupId={activeGroupId}
               myGroups={myGroups}
+              isOnline={isOnline}
             />
           )}
-          {currentView === 'account' && <AccountSettings user={currentUser} onUpdate={updateUser} />}
-          {currentView === 'my-account' && <MyAccount user={currentUser} groups={groups} activeGroupId={activeGroupId} />}
-
+          {currentView === 'account' && (
+            <AccountSettings
+              user={currentUser}
+              onUpdate={updateUser}
+              isOnline={isOnline}
+            />
+          )}
+          {currentView === 'my-account' && (
+            <MyAccount
+              user={currentUser}
+              groups={groups}
+              activeGroupId={activeGroupId}
+              isOnline={isOnline}
+            />
+          )}
         </div>
       </main>
     </div>
   );
 };
 
-const AccountSettings: React.FC<{ user: User, onUpdate: (u: User) => void }> = ({ user, onUpdate }) => {
+const AccountSettings: React.FC<{ user: User, onUpdate: (u: User) => void, isOnline: boolean }> = ({ user, onUpdate, isOnline }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   
   const handleUpdatePassword = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede actualizar la contraseña hasta que vuelva internet.");
+      return;
+    }
     if (!newPassword) {
       alert("Por favor introduce una nueva contraseña.");
       return;
@@ -1562,12 +1779,77 @@ const AccountSettings: React.FC<{ user: User, onUpdate: (u: User) => void }> = (
   );
 };
 
-const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string | null }> = ({ user, groups, activeGroupId }) => {
+const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string | null; isOnline: boolean }> = ({ user, groups, activeGroupId, isOnline }) => {
   const groupName =
     groups.find(g => g.id === activeGroupId)?.name ||
     (user.role === 'coordinator' ? 'Coordinación' : 'Sin grupo');
 
   const birth = user.birthDate ? String(user.birthDate).slice(0, 10) : '';
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  useEffect(() => {
+    const checkPushStatus = async () => {
+      if (!("serviceWorker" in navigator)) return;
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        setPushEnabled(!!subscription);
+      } catch (error) {
+        console.error("Error comprobando estado de notificaciones push:", error);
+        setPushEnabled(false);
+      }
+    };
+
+    void checkPushStatus();
+  }, []);
+
+  const handleEnablePush = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden activar las notificaciones hasta que vuelva internet.");
+      return;
+    }
+
+    setPushLoading(true);
+    try {
+      const subscription = await subscribeToPush(user.id);
+
+      if (!subscription) {
+        alert("No se concedió permiso para las notificaciones.");
+        setPushEnabled(false);
+        return;
+      }
+
+      setPushEnabled(true);
+      alert("Notificaciones activadas correctamente.");
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message ?? "No se pudieron activar las notificaciones.");
+      setPushEnabled(false);
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden desactivar las notificaciones hasta que vuelva internet.");
+      return;
+    }
+
+    setPushLoading(true);
+    try {
+      await unsubscribeFromPush();
+      setPushEnabled(false);
+      alert("Notificaciones desactivadas correctamente.");
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message ?? "No se pudieron desactivar las notificaciones.");
+    } finally {
+      setPushLoading(false);
+    }
+  };
 
   return (
     <div className="max-w-md mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1618,7 +1900,65 @@ const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string |
               {birth || 'No registrada'}
             </div>
           </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
+              Notificaciones
+            </label>
 
+            <div className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    {pushEnabled ? <Bell size={16} /> : <BellOff size={16} />}
+                    {pushEnabled ? "Activadas" : "Desactivadas"}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Recibe avisos cuando haya novedades relevantes en la aplicación, como eventos nuevos.
+                  </p>
+                  {!isOnline && (
+                    <p className="text-xs text-amber-700 mt-2 font-medium">
+                      Sin conexión. No puedes cambiar esta opción ahora mismo.
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={pushLoading || !isOnline}
+                  onClick={() => {
+                    if (pushEnabled) {
+                      void handleDisablePush();
+                    } else {
+                      void handleEnablePush();
+                    }
+                  }}
+                  className={`shrink-0 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                    pushLoading || !isOnline
+                      ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                      : pushEnabled
+                        ? "bg-red-50 text-red-600 hover:bg-red-100"
+                        : "bg-indigo-600 text-white hover:bg-indigo-700"
+                  }`}
+                >
+                  {pushLoading
+                    ? "Procesando..."
+                    : pushEnabled
+                      ? "Desactivar"
+                      : "Activar"}
+                </button>
+              </div>
+            </div>
+
+            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-700">
+              <div>secureContext: {String(window.isSecureContext)}</div>
+              <div>display-mode standalone: {String(window.matchMedia?.("(display-mode: standalone)")?.matches)}</div>
+              <div>navigator.standalone: {String((navigator as any).standalone ?? false)}</div>
+              <div>serviceWorker in navigator: {String("serviceWorker" in navigator)}</div>
+              <div>PushManager in window: {String("PushManager" in window)}</div>
+              <div>Notification in window: {String("Notification" in window)}</div>
+              <div>notification permission: {typeof Notification !== "undefined" ? Notification.permission : "n/a"}</div>
+            </div>
+          </div>
           <div className="mt-6 p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
             <span className="font-bold">Aviso:</span> Para cualquier cambio, por favor ponte en contacto con el coordinador de tu nivel.
           </div>

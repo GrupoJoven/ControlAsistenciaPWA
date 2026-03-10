@@ -9,6 +9,7 @@ type Props = {
   students: Student[];
   warningMessage?: string;
   warningType?: "no-group" | "no-students";
+  isOnline: boolean;
 };
 
 type MassServiceRow = {
@@ -26,7 +27,7 @@ function offClasses() {
   return "bg-slate-100 text-slate-400 border-slate-200";
 }
 
-const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMessage, warningType }) => {
+const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMessage, warningType, isOnline }) => {
 
   // studentId -> Set("B"|"L"|"P")
   const [doneByStudent, setDoneByStudent] = useState<Map<string, Set<ServiceType>>>(new Map());
@@ -44,6 +45,10 @@ const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMes
         return;
       }
 
+      if (!isOnline) {
+        setDoneByStudent(new Map());
+        return;
+      }
       setLoading(true);
       try {
         const ids = students.map(s => s.id);
@@ -83,6 +88,10 @@ const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMes
   };
 
   const toggleService = async (studentId: string, serviceType: ServiceType) => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden modificar los servicios hasta que vuelva internet.");
+      return;
+    }
     if (!currentUser) return;
 
     const key = `${studentId}-${serviceType}`;
@@ -150,7 +159,11 @@ const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMes
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <WarningBox />
-
+      {!isOnline && (
+        <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          <span className="font-bold">Modo sin conexión:</span> puedes consultar los alumnos, pero no modificar los servicios de misa hasta que vuelva internet.
+        </div>
+      )}
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -218,19 +231,22 @@ const ServicesManagement: React.FC<Props> = ({ currentUser, students, warningMes
                         if (!clickable) return;
                         void toggleService(st.id, svc.key);
                       }}
-                      disabled={!clickable || !!togglingKey}
+                      disabled={!isOnline || !clickable || !!togglingKey}
                       className={[
                         "w-11 h-11 rounded-xl border font-bold flex items-center justify-center transition-all select-none",
                         on ? svc.onClasses : offClasses(),
-                        clickable ? "hover:scale-[1.02]" : "opacity-80 cursor-default",
+                        isOnline && clickable ? "hover:scale-[1.02]" : "opacity-80 cursor-default",
+                        !isOnline ? "opacity-60" : "",
                         busy ? "opacity-60" : "",
                       ].join(" ")}
                       title={
-                        clickable
-                          ? on
-                            ? `Quitar ${svc.label}`
-                            : `Marcar ${svc.label}`
-                          : "Abre la tarjeta para editar"
+                        !isOnline
+                          ? "Sin conexión"
+                          : clickable
+                            ? on
+                              ? `Quitar ${svc.label}`
+                              : `Marcar ${svc.label}`
+                            : "Abre la tarjeta para editar"
                       }
                     >
                       {svc.label}

@@ -20,9 +20,10 @@ interface AttendanceTrackerProps {
   classDays: string[];
   warningMessage?: string;
   warningType?: "no-group" | "no-students";
+  isOnline: boolean;
 }
 
-const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdate, classDays, warningMessage, warningType }) => {
+const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdate, classDays, warningMessage, warningType, isOnline }) => {
   const todayRaw = getTodayStr();
   const todayPretty = new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const isClassDay = classDays.includes(todayRaw);
@@ -60,6 +61,10 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
   };
 
   const sendStandardEmailOne = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede enviar el email hasta que vuelva internet.");
+      return;
+    }
     if (!confirmOne) return;
 
     const st: any = confirmOne.student;
@@ -108,6 +113,10 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
   };
 
   const sendStandardEmailAll = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden enviar los emails hasta que vuelva internet.");
+      return;
+    }
     setIsSendingAll(true);
     try {
       const student_ids = students.map(s => s.id);
@@ -173,10 +182,15 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
 
           return (
             <button
+              disabled={!isOnline}
               onClick={() => {
                 setConfirmAll({ totalTargets: targets.length });
               }}
-              className="bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold text-[10px] sm:text-xs px-3 py-2 rounded-xl transition-colors"
+              className={`font-bold text-[10px] sm:text-xs px-3 py-2 rounded-xl transition-colors border ${
+                isOnline
+                  ? "bg-white/15 hover:bg-white/25 border-white/20 text-white"
+                  : "bg-white/10 border-white/10 text-white/50 cursor-not-allowed"
+              }`}
             >
               INFORMAR A TODOS LOS PADRES ({targets.length})
             </button>
@@ -241,6 +255,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
                     <td className="px-2 lg:px-6 py-4 text-right">
                       {showAviso && (
                         <button
+                          disabled={!isOnline}
                           onClick={() => {
                             const record = student.attendanceHistory.find(h => h.date === todayRaw);
                             const statusCat = record?.catechism || "absent";
@@ -248,8 +263,12 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
                             const absenceLabel = getAbsenceLabel(statusCat, statusMass);
                             setConfirmOne({ student, absenceLabel });
                           }}
-                          className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors inline-flex items-center"
-                          title="Enviar aviso a los padres"
+                          className={`p-1.5 rounded-lg transition-colors inline-flex items-center ${
+                            isOnline
+                              ? "text-indigo-600 hover:bg-indigo-50"
+                              : "text-slate-300 cursor-not-allowed"
+                          }`}
+                          title={isOnline ? "Enviar aviso a los padres" : "Sin conexión"}
                         >
                           <Mail size={16} />
                         </button>
@@ -285,7 +304,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
               <button onClick={() => setConfirmOne(null)} className="px-6 py-2 rounded-xl text-slate-600 font-bold text-sm">Cancelar</button>
               <button
                 onClick={() => void sendStandardEmailOne()}
-                disabled={isSendingOne}
+                disabled={isSendingOne || !isOnline}
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold rounded-xl text-sm"
               >
                 {isSendingOne ? "Enviando..." : "Enviar"}
@@ -316,7 +335,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students, onUpdat
               <button onClick={() => setConfirmAll(null)} className="px-6 py-2 rounded-xl text-slate-600 font-bold text-sm">Cancelar</button>
               <button
                 onClick={() => void sendStandardEmailAll()}
-                disabled={isSendingAll || confirmAll.totalTargets === 0}
+                disabled={isSendingAll || confirmAll.totalTargets === 0 || !isOnline}
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold rounded-xl text-sm"
               >
                 {isSendingAll ? "Enviando..." : "Enviar a todos"}

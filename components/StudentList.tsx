@@ -33,6 +33,7 @@ interface StudentListProps {
   warningType?: "no-group" | "no-students";
   enableMassServices?: boolean;
   schoolNames: { id: string; name: string }[];
+  isOnline: boolean;
 }
 
 const StudentList: React.FC<StudentListProps> = ({ 
@@ -47,6 +48,7 @@ const StudentList: React.FC<StudentListProps> = ({
   warningType,
   enableMassServices = false,
   schoolNames,
+  isOnline
 }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -107,6 +109,10 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const loadStudentServicesToday = async (studentId: string) => {
+    if (!isOnline) {
+      setServicesToday(new Set());
+      return;
+    }
     const today = getTodayStr();
     setServicesLoading(true);
     try {
@@ -139,8 +145,10 @@ const StudentList: React.FC<StudentListProps> = ({
     setTempPhoto(student.photo);
     setTempHistory(getFullHistory(student));
     setIsEditing(false);
-    if (enableMassServices) {
+    if (enableMassServices && isOnline) {
       void loadStudentServicesToday(student.id);
+    } else {
+      setServicesToday(new Set());
     }
   };
 
@@ -195,6 +203,10 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const handlePhotoDelete = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede eliminar la foto hasta que vuelva internet.");
+      return;
+    }
     if (!selectedStudent?.id) return;
 
     if (!tempPhoto) {
@@ -235,6 +247,11 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede subir la foto hasta que vuelva internet.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     try {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -297,6 +314,10 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const toggleServiceToday = async (serviceType: ServiceType) => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden modificar los servicios hasta que vuelva internet.");
+      return;
+    }
     if (!selectedStudent) return;
 
     // Solo editable en modo edición
@@ -340,6 +361,10 @@ const StudentList: React.FC<StudentListProps> = ({
     }
   };
   const handleSave = () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden guardar cambios hasta que vuelva internet.");
+      return;
+    }
     if (!selectedStudent) return;
 
     if (!tempEmail.trim()) {
@@ -371,6 +396,10 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const handleAddNew = () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede crear el alumno hasta que vuelva internet.");
+      return;
+    }
     if (!onAddStudent || !newName) return;
 
     // Si son NOT NULL, no puedes permitir vacío
@@ -422,7 +451,15 @@ const StudentList: React.FC<StudentListProps> = ({
           )}
         </div>
         {canEditCenso && (
-          <button onClick={() => setIsAddingNew(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold shadow-sm">
+          <button
+            disabled={!isOnline}
+            onClick={() => setIsAddingNew(true)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm ${
+              isOnline
+                ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                : "bg-slate-200 text-slate-500 cursor-not-allowed"
+            }`}
+          >
             <UserPlus size={18} /> Nuevo Niño
           </button>
         )}
@@ -651,7 +688,15 @@ const StudentList: React.FC<StudentListProps> = ({
               )}
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-lg font-bold">Asistencia Curso Actual</h4>
-                  {isEditing && <button onClick={handleSave} className="text-xs font-bold text-green-600 bg-green-50 px-3 py-1.5 rounded-full flex items-center gap-1"><Save size={14} />Guardar</button>}
+                  {isEditing && <button
+                    onClick={handleSave}
+                    disabled={!isOnline}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1 ${
+                      isOnline
+                        ? "text-green-600 bg-green-50"
+                        : "text-slate-400 bg-slate-100 cursor-not-allowed"
+                    }`}
+                  ><Save size={14} />Guardar</button>}
                 </div>
                 <div className="space-y-3">
                   {tempHistory.map((record, i) => (
@@ -717,6 +762,7 @@ const StudentList: React.FC<StudentListProps> = ({
               </button>
 
               <button
+                disabled={!isOnline}
                 onClick={async () => {
                   const id = confirmDeleteStudent.id;
                   setConfirmDeleteStudent(null);
@@ -727,7 +773,11 @@ const StudentList: React.FC<StudentListProps> = ({
                     alert(e?.message ?? "Error eliminando alumno.");
                   }
                 }}
-                className="px-5 py-3 rounded-2xl bg-red-600 text-white font-extrabold hover:bg-red-700"
+                className={`px-5 py-3 rounded-2xl font-extrabold ${
+                  isOnline
+                    ? "bg-red-600 text-white hover:bg-red-700"
+                    : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                }`}
               >
                 Eliminar definitivamente
               </button>

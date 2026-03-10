@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../src/lib/supabaseClient";
 import { Plus, Trash2, Filter, X, AlertTriangle } from "lucide-react";
 import { Group, Student, User } from "../types";
+import { saveOfflineData, getOfflineData } from "../src/utils/offlineStorage";
 
 type GroupCatechistLink = { group_id: string; profile_id: string };
 
@@ -24,9 +25,26 @@ type Props = {
   users: User[]; // "incidentUsers" que preparaste en App.tsx
   activeGroupId: string | null;
   groupCatechistLinks: GroupCatechistLink[];
+  isOnline: boolean;
 };
 
 const normalizeDate = (d: string) => String(d).slice(0, 10);
+
+const buildIncidentsCacheKey = (
+  currentUserId: string,
+  isCoordinator: boolean,
+  effectiveGroupId: string,
+  filterStudentId: string,
+  filterProfileId: string
+) =>
+  [
+    "incidents",
+    currentUserId,
+    isCoordinator ? "coordinator" : "catechist",
+    effectiveGroupId || "all-groups",
+    filterStudentId || "all-students",
+    filterProfileId || "all-profiles",
+  ].join("::");
 
 const IncidentsManager: React.FC<Props> = ({
   currentUser,
@@ -35,6 +53,7 @@ const IncidentsManager: React.FC<Props> = ({
   users,
   activeGroupId,
   groupCatechistLinks,
+  isOnline,
 }) => {
   const isCoordinator = currentUser.role === "coordinator";
 
@@ -153,6 +172,14 @@ const IncidentsManager: React.FC<Props> = ({
     setLoading(true);
     setErrorMsg("");
 
+    const cacheKey = buildIncidentsCacheKey(
+      currentUser.id,
+      isCoordinator,
+      effectiveGroupId,
+      filterStudentId,
+      filterProfileId
+    );
+
     try {
       if (!isCoordinator && !activeGroupId) {
         setRows([]);
@@ -160,22 +187,20 @@ const IncidentsManager: React.FC<Props> = ({
         return;
       }
 
-      const gid = effectiveGroupId;     // coordinator: filtro de grupo opcional / catechist: activeGroupId
+      const gid = effectiveGroupId;
       const sid = filterStudentId;
       const pid = filterProfileId;
 
       let q = buildQuery();
 
-      // filtros directos (siempre fiables)
       if (sid) q = q.eq("student_id", sid);
       if (pid) q = q.eq("profile_id", pid);
 
-      // filtro por grupo: SIEMPRE por student_id IN (...)
-      // (si ya hay student_id filtrado, no hace falta)
       if (gid && !sid) {
         const ids = students.filter(s => s.groupId === gid).map(s => s.id);
         if (ids.length === 0) {
           setRows([]);
+          await saveOfflineData(cacheKey, []);
           return;
         }
         q = q.in("student_id", ids);
@@ -188,10 +213,28 @@ const IncidentsManager: React.FC<Props> = ({
       const { data, error } = await q.limit(500);
       if (error) throw error;
 
-      setRows((data ?? []) as IncidentRow[]);
+      const resultRows = (data ?? []) as IncidentRow[];
+      setRows(resultRows);
+      await saveOfflineData(cacheKey, resultRows);
+
     } catch (e: any) {
-      setRows([]);
-      setErrorMsg(e?.message ?? "Error cargando incidencias.");
+      console.warn("No se pudieron cargar las incidencias desde Supabase", e);
+
+      const cached = await getOfflineData<IncidentRow[]>(cacheKey);
+      const cachedRows = cached?.data ?? [];
+
+      if (cachedRows.length > 0) {
+        setRows(cachedRows);
+        setErrorMsg("No hay conexión. Mostrando las últimas incidencias guardadas para estos filtros.");
+      } else {
+        const message =
+          typeof navigator !== "undefined" && !navigator.onLine
+            ? "No hay conexión y no hay incidencias guardadas para estos filtros."
+            : (e?.message ?? "No se pudieron cargar las incidencias.");
+
+        setRows([]);
+        setErrorMsg(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -225,6 +268,10 @@ const IncidentsManager: React.FC<Props> = ({
   };
 
   const createIncident = async () => {
+    if (!isOnline) {
+      setErrorMsg("No hay conexión. No se pueden crear incidencias hasta que vuelva internet.");
+      return;
+    }
     setErrorMsg("");
 
     const sid = newStudentId.trim();
@@ -280,6 +327,10 @@ const IncidentsManager: React.FC<Props> = ({
   };
 
   const deleteIncident = async (id: string) => {
+    if (!isOnline) {
+      setErrorMsg("No hay conexión. No se pueden eliminar incidencias hasta que vuelva internet.");
+      return;
+    }
     if (!confirm("¿Eliminar esta incidencia?")) return;
 
     setLoading(true);
@@ -336,9 +387,9 @@ const IncidentsManager: React.FC<Props> = ({
 
           <button
             onClick={openCreate}
-            disabled={!canOpenCreate}
+            disabled={!canOpenCreate || !isOnline}
             className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${
-              canOpenCreate
+              canOpenCreate && isOnline
                 ? "bg-indigo-600 text-white hover:bg-indigo-700"
                 : "bg-slate-200 text-slate-500 cursor-not-allowed"
             }`}

@@ -32,6 +32,7 @@ interface ReportsProps {
   events: ParishEvent[];
   activeGroupId: string | null; // viene desde App.tsx
   myGroups: Group[]; // viene desde App.tsx (solo grupos del usuario)
+  isOnline: boolean;
 }
 
 type ReportType = "students" | "catechists";
@@ -61,6 +62,7 @@ const Reports: React.FC<ReportsProps> = ({
   events,
   activeGroupId,
   myGroups,
+  isOnline,
 }) => {
   const [reportType, setReportType] = useState<ReportType>("students");
 
@@ -156,6 +158,13 @@ const Reports: React.FC<ReportsProps> = ({
   // --- Cargar informe existente del mes (si existe, bloquear generación) ---
   const loadExisting = async () => {
     setLoadingExisting(true);
+    if (!isOnline) {
+      setReportRow(null);
+      setReport(null);
+      setIsLocked(false);
+      setLoadingExisting(false);
+      return;
+    }
     try {
       const scope = target.scope;
       const scopeId = target.scope === "group" ? target.scopeId : null;
@@ -197,16 +206,23 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   useEffect(() => {
-    // Evita queries inválidas si catequista aún no tiene activeGroupId listo
     if (target.scope === "group" && !target.scopeId) {
       setReportRow(null);
       setReport(null);
       setIsLocked(false);
       return;
     }
+
+    if (!isOnline) {
+      setReportRow(null);
+      setReport(null);
+      setIsLocked(false);
+      return;
+    }
+
     void loadExisting();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target, reportType, month]);
+  }, [target, reportType, month, isOnline]);
 
   const handleDownloadCSV = () => {
     let headers = "";
@@ -298,6 +314,10 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const handleGenerateReport = async () => {
+    if (!isOnline) {
+      alert("No hay conexión. No se puede generar el informe hasta que vuelva internet.");
+      return;
+    }
     // Guardrail básico: si target group sin id (posible en arranque)
     if (target.scope === "group" && !target.scopeId) {
       alert("No hay grupo activo seleccionado.");
@@ -448,6 +468,7 @@ const Reports: React.FC<ReportsProps> = ({
           <button
             onClick={handleGenerateReport}
             disabled={
+              !isOnline ||
               isGenerating ||
               loadingExisting ||
               isLocked ||
@@ -455,7 +476,9 @@ const Reports: React.FC<ReportsProps> = ({
             }
             className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-100 disabled:opacity-50 text-sm"
             title={
-              isLocked
+              !isOnline
+                ? "No hay conexión."
+                : isLocked
                 ? "Ya existe un informe para este mes y este grupo."
                 : loadingExisting
                 ? "Cargando informe existente..."
@@ -471,7 +494,11 @@ const Reports: React.FC<ReportsProps> = ({
           </button>
         </div>
       </div>
-
+      {!isOnline && (
+        <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          <span className="font-bold">Modo sin conexión:</span> puedes seguir descargando el CSV con los datos ya cargados, pero no consultar informes guardados ni generar nuevos informes IA hasta que vuelva internet.
+        </div>
+      )}
       {report ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="lg:col-span-2 space-y-8">
