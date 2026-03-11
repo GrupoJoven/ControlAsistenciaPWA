@@ -1233,19 +1233,25 @@ const App: React.FC = () => {
       date: String(data.date),
     };
 
-    setEvents(prev => [...prev, createdEvent]);
+    setEvents(prev =>
+      [...prev, createdEvent].sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      )
+    );
 
     try {
-      const formattedDate = new Date(createdEvent.date).toLocaleDateString("es-ES", {
+      const formattedDateTime = new Date(createdEvent.date).toLocaleString("es-ES", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
 
       const res = await supabase.functions.invoke("send-push-notifications", {
         body: {
           title: "Nuevo evento en la agenda",
-          body: `${createdEvent.title} · ${formattedDate}`,
+          body: `${createdEvent.title} · ${formattedDateTime}`,
           url: "/",
         },
       });
@@ -2006,26 +2012,96 @@ const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string |
 };
 
 
-const AgendaManager: React.FC<{ events: ParishEvent[], onAdd: (e: ParishEvent) => void, onRemove: (id: string) => void }> = ({ events, onAdd, onRemove }) => {
+const AgendaManager: React.FC<{
+  events: ParishEvent[],
+  onAdd: (e: ParishEvent) => void,
+  onRemove: (id: string) => void
+}> = ({ events, onAdd, onRemove }) => {
   const [newTitle, setNewTitle] = useState('');
-  const [newDate, setNewDate] = useState('');
+  const [newDateTime, setNewDateTime] = useState('');
+
   const handleAdd = () => {
-    if (!newTitle || !newDate) return;
-    onAdd({ title: newTitle, date: newDate } as any);
+    if (!newTitle || !newDateTime) return;
+
+    onAdd({
+      title: newTitle,
+      date: newDateTime,
+    } as any);
+
     setNewTitle('');
-    setNewDate('');
+    setNewDateTime('');
   };
+
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
+
         <div className="flex flex-col sm:flex-row gap-4">
-          <input type="text" placeholder="Título" className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
-          <input type="date" className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
-          <button onClick={handleAdd} className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center"><Plus size={24} /></button>
+          <input
+            type="text"
+            placeholder="Título"
+            className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+          />
+
+          <input
+            type="datetime-local"
+            className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+            value={newDateTime}
+            onChange={(e) => setNewDateTime(e.target.value)}
+          />
+
+          <button
+            onClick={handleAdd}
+            className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center"
+          >
+            <Plus size={24} />
+          </button>
         </div>
       </div>
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div className="p-6 border-b border-slate-100"><h3 className="font-bold text-slate-800">Eventos Activos</h3></div><div className="divide-y divide-slate-100">{events.map(event => (<div key={event.id} className="p-4 flex items-center justify-between hover:bg-slate-50"><div className="flex items-center gap-4"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><Calendar size={18} /></div><div><p className="font-semibold text-slate-900">{event.title}</p><p className="text-xs text-slate-500">{new Date(event.date).toLocaleDateString()}</p></div></div><button onClick={() => onRemove(event.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Plus size={18} className="rotate-45" /></button></div>))}</div></div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100">
+          <h3 className="font-bold text-slate-800">Eventos Activos</h3>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {events.map(event => (
+            <div
+              key={event.id}
+              className="p-4 flex items-center justify-between hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <Calendar size={18} />
+                </div>
+
+                <div>
+                  <p className="font-semibold text-slate-900">{event.title}</p>
+                  <p className="text-xs text-slate-500">
+                    {new Date(event.date).toLocaleString('es-ES', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => onRemove(event.id)}
+                className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+              >
+                <Plus size={18} className="rotate-45" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };

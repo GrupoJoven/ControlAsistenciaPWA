@@ -35,10 +35,12 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
 
   // Filter and sort only future events
   const upcomingEvents = useMemo(() => {
+    const nowTs = Date.now();
+
     return events
-      .filter(event => event.date >= today)
+      .filter(event => new Date(event.date).getTime() >= nowTs)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [events, today]);
+  }, [events]);
 
   // Monthly chart data based on current academic year class days
   const chartData = useMemo(() => {
@@ -202,7 +204,14 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-semibold text-indigo-900 text-sm truncate">{event.title}</h4>
-                  <p className="text-indigo-700 text-xs mt-0.5">{new Date(event.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</p>
+                  <p className="text-indigo-700 text-xs mt-0.5">
+                    {new Date(event.date).toLocaleString('es-ES', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
                 </div>
               </div>
             )) : (
