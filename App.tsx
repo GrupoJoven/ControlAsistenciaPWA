@@ -85,6 +85,10 @@ const App: React.FC = () => {
   const isOnline = useOnlineStatus();
   const wasOnlineRef = useRef(isOnline);
   const lastRefreshRef = useRef(0);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushStatusChecked, setPushStatusChecked] = useState(false);
+  const [dismissedPushBanner, setDismissedPushBanner] = useState(false);
   const blockIfOffline = (actionLabel = "realizar esta acción") => {
     if (isOnline) return false;
 
@@ -276,6 +280,43 @@ const App: React.FC = () => {
       setSchoolNames(cached?.data ?? []);
     }
   };
+
+  useEffect(() => {
+    const checkPushStatus = async () => {
+      if (!currentUser) {
+        setPushSupported(false);
+        setPushEnabled(false);
+        setPushStatusChecked(false);
+        return;
+      }
+
+      const supported =
+        typeof window !== "undefined" &&
+        "serviceWorker" in navigator &&
+        "PushManager" in window;
+
+      setPushSupported(supported);
+
+      if (!supported) {
+        setPushEnabled(false);
+        setPushStatusChecked(true);
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        setPushEnabled(!!subscription);
+      } catch (error) {
+        console.error("Error comprobando estado global de notificaciones push:", error);
+        setPushEnabled(false);
+      } finally {
+        setPushStatusChecked(true);
+      }
+    };
+
+    void checkPushStatus();
+  }, [currentUser]);
 
   const handleLogin = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -667,6 +708,10 @@ const App: React.FC = () => {
     setShowBirthdayPopup(false);
     setTodayStudentBirthdays([]);
     setShowStudentBirthdayPopup(false);
+    setPushEnabled(false);
+    setPushSupported(false);
+    setPushStatusChecked(false);
+    setDismissedPushBanner(false);
   };
 
 
@@ -1402,9 +1447,42 @@ const App: React.FC = () => {
   }, [showNoGroupWarning, showNoStudentsWarning, currentGroupName]);
 
 
+  const handleEnablePushFromBanner = async () => {
+    if (!currentUser) return;
 
+    if (!isOnline) {
+      alert("No hay conexión. No se pueden activar las notificaciones hasta que vuelva internet.");
+      return;
+    }
+
+    try {
+      const subscription = await subscribeToPush(currentUser.id);
+
+      if (!subscription) {
+        alert("No se concedió permiso para las notificaciones.");
+        setPushEnabled(false);
+        return;
+      }
+
+      setPushEnabled(true);
+      setDismissedPushBanner(true);
+      alert("Notificaciones activadas correctamente.");
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message ?? "No se pudieron activar las notificaciones.");
+      setPushEnabled(false);
+    }
+  };
 
   if (!currentUser) return <Login onLogin={handleLogin} />;
+
+  const showPushBanner =
+    !!currentUser &&
+    isOnline &&
+    pushSupported &&
+    pushStatusChecked &&
+    !pushEnabled &&
+    !dismissedPushBanner;
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden relative">
@@ -1593,6 +1671,44 @@ const App: React.FC = () => {
           </div>
         </header>
 
+        {showPushBanner && (
+          <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <BellOff size={18} className="mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-semibold">Activa las notificaciones</p>
+                  <p>
+                    Ahora mismo están desactivadas. Actívalas para recibir avisos cuando haya novedades relevantes, como nuevos eventos en la agenda.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleEnablePushFromBanner();
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors"
+                >
+                  Activar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDismissedPushBanner(true)}
+                  className="p-2 rounded-xl text-indigo-500 hover:bg-indigo-100 transition-colors"
+                  aria-label="Cerrar aviso de notificaciones"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+
         {!isOnline && (
           <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm">
             <div className="flex items-start gap-3">
@@ -1748,6 +1864,8 @@ const App: React.FC = () => {
               groups={groups}
               activeGroupId={activeGroupId}
               isOnline={isOnline}
+              pushEnabled={pushEnabled}
+              setPushEnabled={setPushEnabled}
             />
           )}
         </div>
@@ -1832,31 +1950,20 @@ const AccountSettings: React.FC<{ user: User, onUpdate: (u: User) => void, isOnl
   );
 };
 
-const MyAccount: React.FC<{ user: User; groups: Group[]; activeGroupId: string | null; isOnline: boolean }> = ({ user, groups, activeGroupId, isOnline }) => {
+const MyAccount: React.FC<{
+  user: User;
+  groups: Group[];
+  activeGroupId: string | null;
+  isOnline: boolean;
+  pushEnabled: boolean;
+  setPushEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+}> = ({ user, groups, activeGroupId, isOnline, pushEnabled, setPushEnabled }) => {
   const groupName =
     groups.find(g => g.id === activeGroupId)?.name ||
     (user.role === 'coordinator' ? 'Coordinación' : 'Sin grupo');
 
   const birth = user.birthDate ? String(user.birthDate).slice(0, 10) : '';
-  const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
-
-  useEffect(() => {
-    const checkPushStatus = async () => {
-      if (!("serviceWorker" in navigator)) return;
-
-      try {
-        const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.getSubscription();
-        setPushEnabled(!!subscription);
-      } catch (error) {
-        console.error("Error comprobando estado de notificaciones push:", error);
-        setPushEnabled(false);
-      }
-    };
-
-    void checkPushStatus();
-  }, []);
 
   const handleEnablePush = async () => {
     if (!isOnline) {
