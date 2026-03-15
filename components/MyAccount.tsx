@@ -10,6 +10,7 @@ interface MyAccountProps {
   isOnline: boolean;
   pushEnabled: boolean;
   setPushEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  onUpdateUser: (u: User) => void;
 }
 
 const MyAccount: React.FC<MyAccountProps> = ({
@@ -19,6 +20,7 @@ const MyAccount: React.FC<MyAccountProps> = ({
   isOnline,
   pushEnabled,
   setPushEnabled,
+  onUpdateUser,
 }) => {
   const groupName =
     groups.find((g) => g.id === activeGroupId)?.name ||
@@ -26,6 +28,12 @@ const MyAccount: React.FC<MyAccountProps> = ({
 
   const birth = user.birthDate ? String(user.birthDate).slice(0, 10) : "";
   const [pushLoading, setPushLoading] = useState(false);
+
+  const handleProfilePhotoChange = (newPhoto: string) => {
+      if (currentUser) {
+        onUpdateUser({ ...currentUser, photo: newPhoto });
+      }
+  };
 
   const handleEnablePush = async () => {
     if (!isOnline) {

@@ -270,16 +270,16 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
 
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  if (!isOnline) {
-    alert("No hay conexión. No se puede subir la foto hasta que vuelva internet.");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    return;
-  }
+    if (!isOnline) {
+      alert("No hay conexión. No se puede subir la foto hasta que vuelva internet.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     try {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // necesitamos un user target: si estás creando (isAdding), aún no hay id
+      // Necesitamos un user target: si estás creando (isAdding), aún no hay id
       if (!selectedUser?.id) {
         alert("Primero crea el usuario y después podrás subir la foto.");
         return;
@@ -299,7 +299,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `profiles/${selectedUser.id}/avatar.${ext}`;
 
-      // 1) subir a storage (upsert para reemplazar)
+      // 1) Subir a storage (upsert para reemplazar)
       const { error: upErr } = await supabase.storage
         .from("media")
         .upload(path, file, { upsert: true, contentType: file.type });
@@ -309,7 +309,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
         return;
       }
 
-      // 2) guardar ruta en BD
+      // 2) Guardar ruta en BD
       const { error: dbErr } = await supabase
         .from("profiles")
         .update({ photo_path: path })
@@ -320,13 +320,18 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
         return;
       }
 
-      // 3) preview local inmediata (sin base64)
+      // 3) Preview local inmediata (sin base64)
       setPhoto(URL.createObjectURL(file));
 
-      // 4) refresca datos globales (para que se vea en cards también)
-      // si no tienes acceso aquí a loadBaseData, no pasa nada: lo veremos en el siguiente paso
+      // 4) Refrescar datos globales
+      // Actualizamos la foto de perfil globalmente
+      onUpdateUser({
+        ...selectedUser,
+        photo: URL.createObjectURL(file), // Actualizamos el `photo` en el perfil global
+      });
+
     } finally {
-      // permitir re-subir el mismo fichero
+      // Permitir re-subir el mismo fichero
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -383,10 +388,10 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     try {
       const prefix = `profiles/${selectedUser.id}`;
 
-      // 1) borrar subcarpeta completa (todos los objetos bajo profiles/<id>/)
+      // 1) Borrar subcarpeta completa (todos los objetos bajo profiles/<id>/)
       await deleteStorageFolder(prefix);
 
-      // 2) limpiar photo_path en BD
+      // 2) Limpiar photo_path en la base de datos
       const { error: dbErr } = await supabase
         .from("profiles")
         .update({ photo_path: null })
@@ -396,15 +401,15 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
         alert("Foto borrada del Storage, pero no se pudo actualizar el perfil: " + dbErr.message);
       }
 
-      // 3) reflejo en UI y refresh global
-      setPhoto(undefined);
-      onUpdateUser({ ...selectedUser, photo: undefined, name, birthDate });
+      // 3) Reflejo en UI y actualización global
+      setPhoto(undefined);  // Actualiza el estado local para que la foto se elimine de la UI.
+      onUpdateUser({ ...selectedUser, photo: undefined, name, birthDate });  // Actualiza el estado global
+
     } catch (e: any) {
       console.error(e);
       alert(e?.message ?? "Error eliminando foto");
     }
   };
-
 
   const cycleStatus = (index: number, subType?: "catechism" | "mass") => {
     if (!isEditing) return;

@@ -11,6 +11,7 @@ interface AppSidebarProps {
   onCloseSidebar: () => void;
   onNavigate: (view: View) => void;
   onLogout: () => void;
+  onUpdateUser: (u: User) => void;
 }
 
 const AppSidebar: React.FC<AppSidebarProps> = ({
@@ -20,7 +21,13 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
   onCloseSidebar,
   onNavigate,
   onLogout,
+  onUpdateUser,
 }) => {
+  const handleProfilePhotoChange = (newPhoto: string) => {
+      if (currentUser) {
+        onUpdateUser({ ...currentUser, photo: newPhoto });
+      }
+  };
   return (
     <>
       {isSidebarOpen && (

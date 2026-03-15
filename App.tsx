@@ -1354,6 +1354,7 @@ const App: React.FC = () => {
         onLogout={() => {
           void handleLogout();
         }}
+        onUpdateUser={updateUser}
       />
       <main className="flex-1 overflow-y-auto w-full">
         <AppHeader
@@ -1560,6 +1561,7 @@ const App: React.FC = () => {
               isOnline={isOnline}
               pushEnabled={pushEnabled}
               setPushEnabled={setPushEnabled}
+              onUpdateUser={updateUser}
             />
           )}
         </div>

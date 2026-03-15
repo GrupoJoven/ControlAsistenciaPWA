@@ -1,4 +1,5 @@
 
+
 import { useState, useEffect, useMemo } from 'react';
 import {
   Users,
@@ -34,17 +35,11 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     () => groups.find(g => g.id === selectedGroupId) ?? null,
     [groups, selectedGroupId]
   );
+
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
-
   const [isEditingCatechists, setIsEditingCatechists] = useState(false);
-  const [movingStudent, setMovingStudent] = useState<Student | null>(null);
-  const [pendingMove, setPendingMove] = useState<{
-    student: Student;
-    fromGroup: Group;
-    toGroup: Group;
-  } | null>(null);
-  
+
   const catechists = users.filter(u => u.role === 'catechist' || u.role === 'coordinator');
   const groupStudents = students.filter(s => s.groupId === selectedGroup?.id);
 
@@ -52,28 +47,21 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     ? catechists.filter(c => selectedGroup.catechistIds.includes(c.id))
     : [];
 
-  const startMoveStudent = (s: Student) => setMovingStudent(s);
-
-  const confirmMoveStudent = async () => {
-    if (!pendingMove) return;
-
-    const { student, toGroup } = pendingMove;
-
-    await onUpdateStudent({ ...student, groupId: toGroup.id });
-
-    setPendingMove(null);
-    setMovingStudent(null);
-  };
+  // Reset editing states when group is deselected
+  useEffect(() => {
+    if (!selectedGroupId) {
+      setIsEditingName(false);
+      setIsEditingCatechists(false);
+    }
+  }, [selectedGroupId]);
 
   const handleUpdateName = async () => {
     if (!selectedGroup) return;
-
     try {
       await onUpdateGroup({ ...selectedGroup, name: newName });
       setIsEditingName(false);
     } catch (e) {
       console.error(e);
-      // aquí puedes mostrar un toast o mantener la edición abierta
     }
   };
 
@@ -82,7 +70,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     const isAssigned = selectedGroup.catechistIds.includes(userId);
     onAssignCatechist(userId, selectedGroup.id, !isAssigned);
   };
-
 
   return (
     <div className="space-y-6">
@@ -108,35 +95,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({
           </div>
         ))}
       </div>
-      {pendingMove && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-slate-900/50"
-            onClick={() => setPendingMove(null)}
-          />
-          <div className="relative bg-white w-full max-w-md mx-4 rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-            <div className="p-5 border-b border-slate-100">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Confirmar cambio</p>
-              <p className="font-bold text-slate-900">¿Seguro que quieres cambiar a {pendingMove.student.name} del grupo {pendingMove.fromGroup.name} al grupo {pendingMove.toGroup.name}?</p>
-            </div>
-
-            <div className="p-5 flex gap-3 justify-end">
-              <button
-                onClick={() => setPendingMove(null)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => void confirmMoveStudent()}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700"
-              >
-                Continuar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {selectedGroup && (
         <>
@@ -144,7 +102,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
             <div className="bg-white w-full max-w-2xl h-full shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300 flex flex-col">
               <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50 sticky top-0 z-10">
                 <button 
-                  onClick={() => setSelectedGroupId(null)}
+                  onClick={() => setSelectedGroupId(null)}  // This will close the group editor
                   className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
                 >
                   <ChevronRight className="rotate-180" size={24} />
@@ -241,7 +199,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({
                   )}
                 </section>
 
-
                 {/* Participants Section */}
                 <section>
                   <div className="flex items-center justify-between mb-4">
@@ -281,52 +238,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({
               </div>
             </div>
           </div>
-          {movingStudent && selectedGroup && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center">
-              <div
-                className="absolute inset-0 bg-slate-900/40"
-                onClick={() => setMovingStudent(null)}
-              />
-              <div className="relative bg-white w-full max-w-md mx-4 rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Cambiar de grupo</p>
-                    <p className="font-bold text-slate-900 truncate">{movingStudent.name}</p>
-                  </div>
-                  <button
-                    onClick={() => setMovingStudent(null)}
-                    className="p-2 rounded-xl hover:bg-slate-100 text-slate-500"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                <div className="p-5 space-y-2">
-                  {groups
-                    .filter(g => g.id !== selectedGroup.id)
-                    .map(g => (
-                      <button
-                        key={g.id}
-                        onClick={() => {
-                          if (!movingStudent || !selectedGroup) return;
-                          setPendingMove({ student: movingStudent, fromGroup: selectedGroup, toGroup: g });
-                        }}
-                        className="w-full flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-colors text-left"
-                      >
-                        <span className="font-bold text-slate-800">{g.name}</span>
-                        <ChevronRight size={18} className="text-slate-400" />
-                      </button>
-                    ))}
-
-                  {groups.filter(g => g.id !== selectedGroup.id).length === 0 && (
-                    <div className="p-6 bg-slate-50 rounded-2xl text-sm text-slate-500">
-                      No hay otros grupos disponibles.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
