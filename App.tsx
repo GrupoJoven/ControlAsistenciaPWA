@@ -3,29 +3,39 @@ import { supabase } from "./src/lib/supabaseClient";
 import { saveOfflineData, getOfflineData } from "./src/utils/offlineStorage";
 import { useOnlineStatus } from "./src/hooks/useOnlineStatus";
 import { subscribeToPush, unsubscribeFromPush } from "./src/pwa/push";
+import { normalizeSearchText } from "./src/utils/text";
+import {
+  getActiveGroupStudents,
+  getCurrentGroupName,
+  getFilteredUsers,
+  getGroupsWithCatechists,
+  getHasAnyGroupAssigned,
+  getMyCatecumenos,
+  getMyGroups,
+  getUserGroupIdsFromLinks,
+  getWarningFlags,
+  getWarningMessage,
+} from "./src/app/selectors";
+
+import {
+  loadGroupsAndLinks,
+  loadProfiles,
+  loadSchoolNames,
+  signMediaUrl,
+  loadEvents,
+  loadClassDays,
+  loadStudents,
+  loadAttendance,
+
+} from "./src/app/loaders";
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  Users, 
-  Calendar, 
-  BarChart3, 
-  LogOut, 
-  Mail, 
   Plus, 
-  Search,
-  CheckCircle2,
-  User as UserIcon,
-  Church,
-  ShieldCheck,
-  Settings,
-  CalendarDays,
-  Briefcase,
-  Key,
-  Menu,
-  ClipboardList,
   TriangleAlert,
   Bell,
   BellOff,
+  Search,
   X
 } from 'lucide-react';
 import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, AttendanceStatus, CatechistAttendanceRecord } from './types';
@@ -43,15 +53,20 @@ import SchoolCalendar from "./components/SchoolCalendar";
 import BirthdayPopup from './components/BirthdayPopup';
 import StudentBirthdayPopup from './components/StudentBirthdayPopup';
 import IncidentsManager from './components/IncidentsManager';
+import AccountSettings from './components/AccountSettings';
+import MyAccount from './components/MyAccount';
+import AgendaManager from './components/AgendaManager';
+import AppSidebar from "./components/layout/AppSidebar";
+import AppHeader from "./components/layout/AppHeader";
 
-type View = 'dashboard' | 'school-calendar' | 'attendance' | 'students' | 'services' | 'incidents' | 'coordinator-groups' | 'coordinator-edit-groups' | 'agenda' | 'reports' | 'class-days' | 'catechists' | 'catechist-attendance' | 'account' | 'my-account';
 
-const normalizeSearchText = (text: string) =>
-  text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
+import {
+  View,
+  GroupCatechistLink,
+  SchoolName,
+  BirthdayInfo,
+  StudentBirthdayInfo,
+} from "./src/types/app";
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -64,21 +79,17 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [incidentUsers, setIncidentUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  type GroupCatechistLink = { group_id: string; profile_id: string };
 
   const [groupCatechistLinks, setGroupCatechistLinks] = useState<GroupCatechistLink[]>([]);
-  type SchoolName = { id: string; name: string };
 
   const [schoolNames, setSchoolNames] = useState<SchoolName[]>([]);
 
   // Para catequistas con varios grupos: cuál está “activo” en la UI
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  type BirthdayInfo = { id: string; name: string; age: number };
 
   const [baseDataLoaded, setBaseDataLoaded] = useState(false);
   const [todayBirthdays, setTodayBirthdays] = useState<BirthdayInfo[]>([]);
   const [showBirthdayPopup, setShowBirthdayPopup] = useState(false);
-  type StudentBirthdayInfo = { student_id: string; student_name: string; age: number; group_id: string };
 
   const [todayStudentBirthdays, setTodayStudentBirthdays] = useState<StudentBirthdayInfo[]>([]);
   const [showStudentBirthdayPopup, setShowStudentBirthdayPopup] = useState(false);
@@ -108,7 +119,7 @@ const App: React.FC = () => {
     lastRefreshRef.current = now;
 
     try {
-      await loadSchoolNames();
+      setSchoolNames(await loadSchoolNames());
       await loadBaseData(currentUser);
     } catch (error) {
       console.error("Error refrescando datos base:", error);
@@ -125,7 +136,7 @@ const App: React.FC = () => {
       try {
         const { data: profile, error } = await supabase
           .from("profiles")
-          .select("id, name, role, birth_date")
+          .select("id, name, role, birth_date, photo_path")
           .eq("id", sessionUser.id)
           .single();
 
@@ -139,6 +150,7 @@ const App: React.FC = () => {
           email: sessionUser.email ?? "",
           role: profile.role,
           birthDate: profile.birth_date ? String(profile.birth_date) : "",
+          photo: await signMediaUrl(profile.photo_path),
         };
 
         await saveOfflineData("currentUser", appUser);
@@ -161,7 +173,7 @@ const App: React.FC = () => {
       if (!appUser) return;
 
       setCurrentUser(appUser);
-      await loadSchoolNames();
+      setSchoolNames(await loadSchoolNames());
       await loadBaseData(appUser);
     };
 
@@ -262,27 +274,6 @@ const App: React.FC = () => {
     };
   }, [currentUser, isOnline]);
 
-
-  const loadSchoolNames = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("school_names")
-        .select("id, name")
-        .order("name", { ascending: true });
-
-      if (error) throw error;
-
-      const mapped = data ?? [];
-      await saveOfflineData("schoolNames", mapped);
-      setSchoolNames(mapped);
-    } catch (error) {
-      console.warn("No se pudieron cargar schoolNames desde Supabase, intentando offline", error);
-
-      const cached = await getOfflineData<SchoolName[]>("schoolNames");
-      setSchoolNames(cached?.data ?? []);
-    }
-  };
-
   useEffect(() => {
     const checkPushStatus = async () => {
       if (!currentUser) {
@@ -339,7 +330,7 @@ const App: React.FC = () => {
   
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, name, role, birth_date")
+      .select("id, name, role, birth_date, photo_path")
       .eq("id", userId)
       .single();
   
@@ -357,12 +348,13 @@ const App: React.FC = () => {
       email: data.user?.email ?? email,
       role: profile.role,
       birthDate: profile.birth_date ? String(profile.birth_date) : "",
+      photo: await signMediaUrl(profile.photo_path),
     };
   
     try {
       await saveOfflineData("currentUser", appUser);
       setCurrentUser(appUser);
-      await loadSchoolNames();
+      setSchoolNames(await loadSchoolNames());
       await loadBaseData(appUser);
       setCurrentView("dashboard");
     } catch (e: any) {
@@ -373,60 +365,9 @@ const App: React.FC = () => {
   };
 
 
-  const getUserGroupIds = (userId: string) =>
-    groupCatechistLinks
-      .filter(l => l.profile_id === userId)
-      .map(l => l.group_id);
-
-
   const loadBaseData = async (user: User) => {
     setBaseDataLoaded(false);
-    const signMediaUrl = async (path?: string | null) => {
-      if (!path) return "";
-      const { data, error } = await supabase.storage
-        .from("media")
-        .createSignedUrl(path, 60 * 60); // 1 hora
-      if (error || !data?.signedUrl) return "";
-      return data.signedUrl;
-    };
-    // --- groups + group_catechist ---
-    let groupsMapped: Group[] = [];
-    let links: GroupCatechistLink[] = [];
-
-    try {
-      const { data: groupsData, error: groupsErr } = await supabase
-        .from("groups")
-        .select("id, name")
-        .order("name", { ascending: true });
-
-      if (groupsErr) throw groupsErr;
-
-      const { data: linksData, error: linksErr } = await supabase
-        .from("group_catechist")
-        .select("group_id, profile_id");
-
-      if (linksErr) throw linksErr;
-
-      groupsMapped = (groupsData ?? []).map(g => ({
-        id: g.id,
-        name: g.name,
-        catechistIds: [],
-      }));
-
-      links = (linksData ?? []) as GroupCatechistLink[];
-
-      await saveOfflineData("groups", groupsMapped);
-      await saveOfflineData("groupCatechistLinks", links);
-
-    } catch (error) {
-      console.warn("No se pudieron cargar groups/group_catechist desde Supabase, intentando offline", error);
-
-      const cachedGroups = await getOfflineData<Group[]>("groups");
-      const cachedLinks = await getOfflineData<GroupCatechistLink[]>("groupCatechistLinks");
-
-      groupsMapped = cachedGroups?.data ?? [];
-      links = cachedLinks?.data ?? [];
-    }
+    const { groups: groupsMapped, links } = await loadGroupsAndLinks();
 
     setGroupCatechistLinks(links);
     setGroups(groupsMapped);
@@ -436,33 +377,7 @@ const App: React.FC = () => {
       .map(l => l.group_id);
 
     setActiveGroupId(prev => (prev && myGroupIds.includes(prev) ? prev : (myGroupIds[0] ?? null)));
-    // --- profiles (users base) ---
-    let usersMapped: User[] = [];
-
-    try {
-      const { data: profData, error: profErr } = await supabase
-        .from("profiles")
-        .select("id, name, email, role, birth_date, photo_path")
-        .order("name", { ascending: true });
-
-      if (profErr) throw profErr;
-
-      usersMapped = await Promise.all((profData ?? []).map(async (p: any) => ({
-        id: p.id,
-        name: p.name ?? "",
-        email: p.email ?? "",
-        role: p.role,
-        birthDate: p.birth_date ? String(p.birth_date).slice(0, 10) : "",
-        photo: await signMediaUrl(p.photo_path),
-        attendanceHistory: [],
-      })));
-
-    } catch (error) {
-      console.warn("No se pudieron cargar profiles desde Supabase, intentando offline", error);
-
-      const cached = await getOfflineData<User[]>("users");
-      usersMapped = cached?.data ?? [];
-    }
+    const usersMapped = await loadProfiles();
 
 
     // --- lista mínima de usuarios para filtros de incidencias ---
@@ -503,129 +418,24 @@ const App: React.FC = () => {
       : usersMapped.filter(u => u.id === user.id);
 
     // --- students + student_attendance ---
-    let studentsMapped: Student[] = [];
+    const studentsMapped = await loadStudents();
+    const attendanceByStudent = await loadAttendance();
 
-    try {
-      const { data: studentsData, error: studentsErr } = await supabase
-        .from("students")
-        .select("id, name, email, parent_email, school, birth_date, group_id, photo_path");
+    // Combinar asistencia con estudiantes
+    const studentsWithAttendance = studentsMapped.map((student) => ({
+      ...student,
+      attendanceHistory: attendanceByStudent.get(student.id) ?? [],
+    }));
 
-      if (studentsErr) throw studentsErr;
-
-      let all: any[] = [];
-      let from = 0;
-      const pageSize = 1000;
-
-      while (true) {
-        const { data, error } = await supabase
-          .from("student_attendance")
-          .select("student_id, date, catechism, mass")
-          .order("student_id", { ascending: true })
-          .order("date", { ascending: true })
-          .range(from, from + pageSize - 1);
-
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-
-        all = all.concat(data);
-        if (data.length < pageSize) break;
-
-        from += pageSize;
-      }
-
-      const attendanceByStudent = new Map<string, AttendanceRecord[]>();
-
-      for (const r of all ?? []) {
-        const rec: AttendanceRecord = {
-          date: String(r.date),
-          catechism: r.catechism as any,
-          mass: r.mass as any,
-        };
-
-        const arr = attendanceByStudent.get(r.student_id) ?? [];
-        arr.push(rec);
-        attendanceByStudent.set(r.student_id, arr);
-      }
-
-      studentsMapped = await Promise.all(
-        (studentsData ?? []).map(async (s: any) => ({
-          id: s.id,
-          name: s.name,
-          email: s.email ?? "",
-          parentEmail: s.parent_email ?? "",
-          school: s.school ?? null,
-          birthDate: s.birth_date ? String(s.birth_date).slice(0, 10) : "",
-          groupId: s.group_id ?? "",
-          photo: await signMediaUrl(s.photo_path),
-          attendanceHistory: attendanceByStudent.get(s.id) ?? [],
-        }))
-      );
-
-      await saveOfflineData("students", studentsMapped);
-
-    } catch (error) {
-      console.warn("No se pudieron cargar students/student_attendance desde Supabase, intentando offline", error);
-
-      const cached = await getOfflineData<Student[]>("students");
-      studentsMapped = cached?.data ?? [];
-    }
-
-    setStudents(studentsMapped);
+    setStudents(studentsWithAttendance);
 
     // --- parish_events ---
-    let eventsMapped: ParishEvent[] = [];
-
-    try {
-      const { data: eventsData, error: eventsErr } = await supabase
-        .from("parish_events")
-        .select("id, title, date")
-        .order("date", { ascending: true });
-
-      if (eventsErr) throw eventsErr;
-
-      eventsMapped = (eventsData ?? []).map(e => ({
-        id: e.id,
-        title: e.title,
-        date: String(e.date),
-      }));
-
-      // guardar copia offline
-      await saveOfflineData("parishEvents", eventsMapped);
-
-    } catch (error) {
-      console.warn("No se pudieron cargar eventos desde Supabase, intentando offline");
-
-      const cached = await getOfflineData<ParishEvent[]>("parishEvents");
-
-      if (cached?.data) {
-        eventsMapped = cached.data;
-      } else {
-        eventsMapped = [];
-      }
-    }
+    const eventsMapped = await loadEvents();
 
     setEvents(eventsMapped);
 
     // --- class_days ---
-    let classDaysMapped: string[] = [];
-
-    try {
-      const { data: classDaysData, error: classDaysErr } = await supabase
-        .from("class_days")
-        .select("date")
-        .order("date", { ascending: true });
-
-      if (classDaysErr) throw classDaysErr;
-
-      classDaysMapped = (classDaysData ?? []).map(d => String(d.date));
-      await saveOfflineData("classDays", classDaysMapped);
-
-    } catch (error) {
-      console.warn("No se pudieron cargar classDays desde Supabase, intentando offline", error);
-
-      const cached = await getOfflineData<string[]>("classDays");
-      classDaysMapped = cached?.data ?? [];
-    }
+    const classDaysMapped = await loadClassDays();
 
     setClassDays(classDaysMapped);
 
@@ -889,7 +699,7 @@ const App: React.FC = () => {
 
   const setUserGroups = async (userId: string, groupIds: string[]) => {
     if (blockIfOffline("actualizar los grupos del catequista")) return;
-    const current = getUserGroupIds(userId);
+    const current = getUserGroupIdsFromLinks(userId, groupCatechistLinks);
     const next = Array.from(new Set(groupIds)); // dedup
 
     const toAdd = next.filter(gid => !current.includes(gid));
@@ -1234,35 +1044,19 @@ const App: React.FC = () => {
     setActiveGroupId(prev => (prev === groupId ? null : prev));
   };
 
-  const myGroups = useMemo(() => {
-    if (!currentUser) return [];
-    const myIds = new Set(
-      groupCatechistLinks
-        .filter(l => l.profile_id === currentUser.id)
-        .map(l => l.group_id)
-    );
-    return groups
-      .filter(g => myIds.has(g.id))
-      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
-  }, [currentUser, groups, groupCatechistLinks]);
+  const myGroups = useMemo(
+    () => getMyGroups(currentUser, groups, groupCatechistLinks),
+    [currentUser, groups, groupCatechistLinks]
+  );
 
-  const groupsWithCatechists = useMemo(() => {
-    const byGroup = new Map<string, string[]>();
-
-    for (const l of groupCatechistLinks) {
-      const arr = byGroup.get(l.group_id) ?? [];
-      arr.push(l.profile_id);
-      byGroup.set(l.group_id, arr);
-    }
-
-    return groups.map(g => ({
-      ...g,
-      catechistIds: byGroup.get(g.id) ?? [],
-    }));
-  }, [groups, groupCatechistLinks]);
+  const groupsWithCatechists = useMemo(
+    () => getGroupsWithCatechists(groups, groupCatechistLinks),
+    [groups, groupCatechistLinks]
+  );
 
 
   const addEvent = async (event: { title: string; date: string }) => {
+  if (blockIfOffline("añadir evento a la agenda")) return;
     const { data, error } = await supabase
       .from("parish_events")
       .insert({ title: event.title, date: event.date })
@@ -1439,68 +1233,55 @@ const App: React.FC = () => {
   };
 
 
-  const myCatecumenos = useMemo(() => {
-    if (!currentUser) return [];
-    if (!activeGroupId) return [];
-
-    return students
-      .filter(s =>
-        s.groupId === activeGroupId &&
-        normalizeSearchText(s.name).includes(normalizeSearchText(searchQuery))
-      )
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
-      );
-  }, [students, currentUser, activeGroupId, searchQuery]);
-
-
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery) return users;
-    return users.filter(u =>
-      normalizeSearchText(u.name).includes(normalizeSearchText(searchQuery))
-      )
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
-      );
-  }, [users, searchQuery]);
-
-
-  const currentGroupName = useMemo(
-    () => groups.find(g => g.id === activeGroupId)?.name || '',
-    [activeGroupId, groups]
+  const myCatecumenos = useMemo(
+    () => getMyCatecumenos(students, activeGroupId, searchQuery).sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" })),
+    [students, activeGroupId, searchQuery]
   );
 
 
-  const hasAnyGroupAssigned = useMemo(() => {
-    if (!currentUser) return false;
-    return groupCatechistLinks.some(l => l.profile_id === currentUser.id);
-  }, [currentUser, groupCatechistLinks]);
+  const filteredUsers = useMemo(
+    () => getFilteredUsers(users, searchQuery),
+    [users, searchQuery]
+  );
 
-  const myGroupIds = useMemo(() => {
-    if (!currentUser) return [];
-    return groupCatechistLinks
-      .filter(l => l.profile_id === currentUser.id)
-      .map(l => l.group_id);
-  }, [currentUser, groupCatechistLinks]);
 
-  const activeGroupStudents = useMemo(() => {
-    if (!activeGroupId) return [];
-    return students.filter(s => s.groupId === activeGroupId);
-  }, [students, activeGroupId]);
+  const currentGroupName = useMemo(
+    () => getCurrentGroupName(groups, activeGroupId),
+    [groups, activeGroupId]
+  );
 
-  const showNoGroupWarning = !!currentUser && !hasAnyGroupAssigned;
-  const showNoStudentsWarning = !!currentUser && hasAnyGroupAssigned && !!activeGroupId && activeGroupStudents.length === 0;
 
-  const warningMessage = useMemo(() => {
-    if (showNoGroupWarning) {
-      return "No tienes ningún grupo asignado. Contacta con el coordinador si crees que se trata de un error.";
-    }
-    if (showNoStudentsWarning) {
-      const name = currentGroupName || "tu grupo";
-      return `En tu grupo [${name}] no hay ningún niño/a asignado. Contacta con el coordinador si crees que se trata de un error.`;
-    }
-    return "";
-  }, [showNoGroupWarning, showNoStudentsWarning, currentGroupName]);
+  const hasAnyGroupAssigned = useMemo(
+    () => getHasAnyGroupAssigned(currentUser, groupCatechistLinks),
+    [currentUser, groupCatechistLinks]
+  );
+
+
+  const activeGroupStudents = useMemo(
+    () => getActiveGroupStudents(students, activeGroupId),
+    [students, activeGroupId]
+  );
+
+  const { showNoGroupWarning, showNoStudentsWarning } = useMemo(
+    () =>
+      getWarningFlags({
+        currentUser,
+        hasAnyGroupAssigned,
+        activeGroupId,
+        activeGroupStudents,
+      }),
+    [currentUser, hasAnyGroupAssigned, activeGroupId, activeGroupStudents]
+  );
+
+  const warningMessage = useMemo(
+    () =>
+      getWarningMessage({
+        showNoGroupWarning,
+        showNoStudentsWarning,
+        currentGroupName,
+      }),
+    [showNoGroupWarning, showNoStudentsWarning, currentGroupName]
+  );
 
 
   const handleEnablePushFromBanner = async () => {
@@ -1564,169 +1345,28 @@ const App: React.FC = () => {
           }}
         />
       )}
-
-      {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-40 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
-      <aside className={`
-        fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 flex flex-col transition-transform duration-300 transform
-        lg:translate-x-0 lg:static lg:inset-auto
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        <div className="p-6 flex items-center justify-between">
-          <div className="flex items-center gap-3 text-indigo-700 font-bold text-xl leading-tight">
-            <div className="p-2 bg-indigo-100 rounded-lg"><Church size={24} /></div>
-            <div><p>San Pascual Baylón</p><p className="text-sm font-medium text-slate-400">Valencia</p></div>
-          </div>
-          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-slate-400 hover:text-slate-600">
-            <X size={20} />
-          </button>
-        </div>
-
-        <nav className="flex-1 px-4 space-y-1 overflow-y-auto pb-6">
-          <div className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">General</div>
-
-          <button
-            onClick={() => navigateTo('dashboard')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              currentView === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <BarChart3 size={20} />
-            <span className="font-medium text-sm">Resumen</span>
-          </button>
-
-          <button
-            onClick={() => navigateTo('school-calendar')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              currentView === 'school-calendar' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <CalendarDays size={20} />
-            <span className="font-medium text-sm">Calendario escolar</span>
-          </button>
-          
-          <div className="mt-4 px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mi Grupo</div>
-          <button onClick={() => navigateTo('attendance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'attendance' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}><CheckCircle2 size={20} /><span className="font-medium text-sm">Pasar Lista</span></button>
-          <button onClick={() => navigateTo('students')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'students' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}><Users size={20} /><span className="font-medium text-sm">Mis Catecúmenos</span></button>
-          <button
-            onClick={() => navigateTo('services')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              currentView === 'services'
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <ClipboardList size={20} />
-            <span className="font-medium text-sm">Servicios</span>
-          </button>
-          <button
-            onClick={() => navigateTo('incidents')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              currentView === 'incidents' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <TriangleAlert size={20} />
-            <span className="font-medium text-sm">Incidencias</span>
-          </button>
-
-          {currentUser.role === 'coordinator' && (
-            <>
-              <div className="mt-4 px-4 py-2 text-[10px] font-bold text-amber-600 uppercase tracking-widest">Coordinación</div>
-              <button onClick={() => navigateTo('coordinator-groups')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'coordinator-groups' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><ShieldCheck size={20} /><span className="font-medium text-sm">Todos los Niños</span></button>
-              <button onClick={() => navigateTo('catechists')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'catechists' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><Briefcase size={20} /><span className="font-medium text-sm">Registro Catequistas</span></button>
-              <button onClick={() => navigateTo('catechist-attendance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'catechist-attendance' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><CheckCircle2 size={20} /><span className="font-medium text-sm">Asistencia Equipo</span></button>
-              <button onClick={() => navigateTo('coordinator-edit-groups')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'coordinator-edit-groups' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><Settings size={20} /><span className="font-medium text-sm">Editar Grupos</span></button>
-              <button onClick={() => navigateTo('class-days')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'class-days' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><CalendarDays size={20} /><span className="font-medium text-sm">Gestión de calendario</span></button>
-              <button onClick={() => navigateTo('agenda')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'agenda' ? 'bg-amber-50 text-amber-700' : 'text-slate-600 hover:bg-slate-50'}`}><Calendar size={20} /><span className="font-medium text-sm">Gestión Agenda</span></button>
-            </>
-          )}
-
-          <div className="mt-4 px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Análisis</div>
-          <button onClick={() => navigateTo('reports')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'reports' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}><Mail size={20} /><span className="font-medium text-sm">Informes IA</span></button>
-          
-          <div className="mt-4 px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cuenta y Seguridad</div>
-          <button onClick={() => navigateTo('account')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${currentView === 'account' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}><Key size={20} /><span className="font-medium text-sm">Seguridad</span></button>
-          <button
-            onClick={() => navigateTo('my-account')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              currentView === 'my-account'
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <UserIcon size={20} />
-            <span className="font-medium text-sm">Cuenta</span>
-          </button>
-        </nav>
-
-        <div className="p-4 border-t border-slate-200">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 overflow-hidden">
-              {currentUser.photo ? <img src={currentUser.photo} className="w-full h-full object-cover" /> : <UserIcon size={18} />}
-            </div>
-            <div className="flex-1 min-w-0"><p className="text-sm font-medium text-slate-900 truncate">{currentUser.name}</p><p className="text-xs text-slate-500 truncate capitalize">{currentUser.role}</p></div>
-            {/* Fix: removed invalid handleLogout attribute and moved onClick to the button */}
-            <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><LogOut size={18} /></button>
-          </div>
-        </div>
-      </aside>
-
+      <AppSidebar
+        currentUser={currentUser}
+        currentView={currentView}
+        isSidebarOpen={isSidebarOpen}
+        onCloseSidebar={() => setIsSidebarOpen(false)}
+        onNavigate={navigateTo}
+        onLogout={() => {
+          void handleLogout();
+        }}
+      />
       <main className="flex-1 overflow-y-auto w-full">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 lg:px-8 py-3 lg:py-4 flex items-center justify-between min-h-[64px]">
-          <div className="flex items-center gap-3 lg:gap-4 flex-1 min-w-0">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden p-2 bg-slate-100 rounded-lg text-slate-600 hover:bg-slate-200 transition-colors shrink-0"
-            >
-              <Menu size={20} />
-            </button>
-            <h1 className="text-[15px] sm:text-lg lg:text-xl font-semibold text-slate-800 leading-tight line-clamp-2 max-h-[3rem]">
-              {currentView === 'dashboard' && 'Dashboard Parroquial'}
-              {currentView === 'school-calendar' && 'Calendario escolar'}
-              {currentView === 'attendance' && 'Control de Asistencia'}
-              {currentView === 'students' && (currentGroupName || 'Mis Catecúmenos')}
-              {currentView === 'services' && 'Servicios'}
-              {currentView === 'incidents' && 'Gestión de incidencias'}
-              {currentView === 'reports' && 'Informes pastorales con IA'}
-              {currentView === 'coordinator-groups' && 'Gestión Integral de Niños'}
-              {currentView === 'catechists' && 'Registro de Catequistas'}
-              {currentView === 'catechist-attendance' && 'Asistencia del Equipo'}
-              {currentView === 'coordinator-edit-groups' && 'Administración de Grupos'}
-              {currentView === 'agenda' && 'Planificador de Eventos'}
-              {currentView === 'class-days' && 'Calendario de Días Lectivos'}
-              {currentView === 'account' && 'Seguridad de la Cuenta'}
-              {currentView === 'my-account' && 'Mi Cuenta'}
-            </h1>
-            <div>
-              {myGroups.length > 1 && (
-                <select
-                  className="px-3 py-2 bg-slate-100 rounded-xl text-sm"
-                  value={activeGroupId ?? ""}
-                  onChange={(e) => setActiveGroupId(e.target.value || null)}
-                >
-                  {myGroups.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-          
-          <div className="hidden sm:flex items-center gap-4 ml-4">
-            {isSearchView && (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input type="text" placeholder="Buscar..." className="pl-10 pr-4 py-2 bg-slate-100 border-none rounded-full text-sm focus:ring-2 focus:ring-indigo-500 w-48 lg:w-64 transition-all" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-              </div>
-            )}
-          </div>
-        </header>
-
+        <AppHeader
+          currentView={currentView}
+          currentGroupName={currentGroupName}
+          myGroups={myGroups}
+          activeGroupId={activeGroupId}
+          onChangeActiveGroup={setActiveGroupId}
+          onOpenSidebar={() => setIsSidebarOpen(true)}
+          isSearchView={isSearchView}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+        />
         {showPushBanner && (
           <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900 shadow-sm">
             <div className="flex items-start justify-between gap-4">
@@ -1816,7 +1456,7 @@ const App: React.FC = () => {
 
           {currentView === 'students' && (
             <StudentList
-              students={myCatecumenos}
+              students={myCatecumenos.sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }))}
               onUpdateStudent={(s) => void updateStudent(s)}
               groups={groups}
               canEditCenso={false}
@@ -1830,7 +1470,7 @@ const App: React.FC = () => {
           {currentView === 'services' && (
             <ServicesManagement
               currentUser={currentUser}
-              students={myCatecumenos}
+              students={myCatecumenos.sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }))}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
               isOnline={isOnline}
@@ -1860,7 +1500,7 @@ const App: React.FC = () => {
               onRemoveUser={(id) => { void removeUser(id); }}
               onUpdateUser={updateUser}
               onSetUserGroups={(uid, gids) => setUserGroups(uid, gids)}
-              getUserGroupIds={(uid) => getUserGroupIds(uid)}
+              getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
               groups={groups}
               classDays={classDays}
               events={events}
@@ -1909,8 +1549,6 @@ const App: React.FC = () => {
           )}
           {currentView === 'account' && (
             <AccountSettings
-              user={currentUser}
-              onUpdate={updateUser}
               isOnline={isOnline}
             />
           )}
@@ -1930,390 +1568,5 @@ const App: React.FC = () => {
   );
 };
 
-const AccountSettings: React.FC<{ user: User, onUpdate: (u: User) => void, isOnline: boolean }> = ({ user, onUpdate, isOnline }) => {
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  
-  const handleUpdatePassword = async () => {
-    if (!isOnline) {
-      alert("No hay conexión. No se puede actualizar la contraseña hasta que vuelva internet.");
-      return;
-    }
-    if (!newPassword) {
-      alert("Por favor introduce una nueva contraseña.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      alert("Las contraseñas no coinciden.");
-      return;
-    }
-
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-
-    if (error) {
-      alert("No se pudo actualizar la contraseña: " + error.message);
-      return;
-    }
-
-    setNewPassword("");
-    setConfirmPassword("");
-    alert("Contraseña actualizada con éxito.");
-  };
-
-
-  return (
-    <div className="max-w-md mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 lg:p-8 rounded-3xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
-            <Key size={24} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">Seguridad</h2>
-            <p className="text-slate-500 text-sm">Cambia tu contraseña de acceso.</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">Nueva Contraseña</label>
-            <input 
-              type="password"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">Confirmar Contraseña</label>
-            <input 
-              type="password"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-            />
-          </div>
-          <button
-            onClick={() => void handleUpdatePassword()}
-            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg transition-all mt-4"
-          >
-            Actualizar Contraseña
-          </button>
-
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const MyAccount: React.FC<{
-  user: User;
-  groups: Group[];
-  activeGroupId: string | null;
-  isOnline: boolean;
-  pushEnabled: boolean;
-  setPushEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-}> = ({ user, groups, activeGroupId, isOnline, pushEnabled, setPushEnabled }) => {
-  const groupName =
-    groups.find(g => g.id === activeGroupId)?.name ||
-    (user.role === 'coordinator' ? 'Coordinación' : 'Sin grupo');
-
-  const birth = user.birthDate ? String(user.birthDate).slice(0, 10) : '';
-  const [pushLoading, setPushLoading] = useState(false);
-
-  const handleEnablePush = async () => {
-    if (!isOnline) {
-      alert("No hay conexión. No se pueden activar las notificaciones hasta que vuelva internet.");
-      return;
-    }
-
-    setPushLoading(true);
-    try {
-      const subscription = await subscribeToPush(user.id);
-
-      if (!subscription) {
-        alert("No se concedió permiso para las notificaciones.");
-        setPushEnabled(false);
-        return;
-      }
-
-      setPushEnabled(true);
-      alert("Notificaciones activadas correctamente.");
-    } catch (error: any) {
-      console.error(error);
-      alert(error?.message ?? "No se pudieron activar las notificaciones.");
-      setPushEnabled(false);
-    } finally {
-      setPushLoading(false);
-    }
-  };
-
-  const handleDisablePush = async () => {
-    if (!isOnline) {
-      alert("No hay conexión. No se pueden desactivar las notificaciones hasta que vuelva internet.");
-      return;
-    }
-
-    setPushLoading(true);
-    try {
-      await unsubscribeFromPush();
-      setPushEnabled(false);
-      alert("Notificaciones desactivadas correctamente.");
-    } catch (error: any) {
-      console.error(error);
-      alert(error?.message ?? "No se pudieron desactivar las notificaciones.");
-    } finally {
-      setPushLoading(false);
-    }
-  };
-
-  return (
-    <div className="max-w-md mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 lg:p-8 rounded-3xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-4 mb-6">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
-            <UserIcon size={24} />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">Cuenta</h2>
-            <p className="text-slate-500 text-sm">Información de tu perfil.</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
-              Nombre
-            </label>
-            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
-              {user.name || '-'}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
-              Grupo asignado
-            </label>
-            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
-              {groupName}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
-              Correo
-            </label>
-            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
-              {user.email || '-'}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
-              Fecha de nacimiento
-            </label>
-            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
-              {birth || 'No registrada'}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
-              Notificaciones
-            </label>
-
-            <div className="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                    {pushEnabled ? <Bell size={16} /> : <BellOff size={16} />}
-                    {pushEnabled ? "Activadas" : "Desactivadas"}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Recibe avisos cuando haya novedades relevantes en la aplicación, como eventos nuevos.
-                  </p>
-                  {!isOnline && (
-                    <p className="text-xs text-amber-700 mt-2 font-medium">
-                      Sin conexión. No puedes cambiar esta opción ahora mismo.
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  disabled={pushLoading || !isOnline}
-                  onClick={() => {
-                    if (pushEnabled) {
-                      void handleDisablePush();
-                    } else {
-                      void handleEnablePush();
-                    }
-                  }}
-                  className={`shrink-0 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                    pushLoading || !isOnline
-                      ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                      : pushEnabled
-                        ? "bg-red-50 text-red-600 hover:bg-red-100"
-                        : "bg-indigo-600 text-white hover:bg-indigo-700"
-                  }`}
-                >
-                  {pushLoading
-                    ? "Procesando..."
-                    : pushEnabled
-                      ? "Desactivar"
-                      : "Activar"}
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
-            <span className="font-bold">Aviso:</span> Para cualquier cambio, por favor ponte en contacto con el coordinador de tu nivel.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const AgendaManager: React.FC<{
-  events: ParishEvent[];
-  onAdd: (e: { title: string; date: string }) => void;
-  onRemove: (id: string) => void;
-}> = ({ events, onAdd, onRemove }) => {
-  const [newTitle, setNewTitle] = useState("");
-  const [newDateTime, setNewDateTime] = useState("");
-  const [eventToDelete, setEventToDelete] = useState<ParishEvent | null>(null);
-
-  const handleAdd = () => {
-    if (!newTitle || !newDateTime) return;
-
-    onAdd({
-      title: newTitle,
-      date: newDateTime,
-    });
-
-    setNewTitle("");
-    setNewDateTime("");
-  };
-
-  return (
-    <>
-      {eventToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-slate-800 mb-3">
-              Eliminar evento
-            </h3>
-
-            <p className="text-slate-600 mb-6">
-              ¿Seguro que quieres eliminar el evento
-              <span className="font-semibold"> "{eventToDelete.title}"</span> del día
-              <span className="font-semibold">
-                {" "}
-                {new Date(eventToDelete.date).toLocaleString("es-ES", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-              ?
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setEventToDelete(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-
-              <button
-                onClick={() => {
-                  onRemove(eventToDelete.id);
-                  setEventToDelete(null);
-                }}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
-              >
-                Eliminar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="space-y-6 max-w-2xl mx-auto">
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
-
-          <div className="flex flex-col sm:flex-row gap-4">
-            <input
-              type="text"
-              placeholder="Título"
-              className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-            />
-
-            <input
-              type="datetime-local"
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-              value={newDateTime}
-              onChange={(e) => setNewDateTime(e.target.value)}
-            />
-
-            <button
-              onClick={handleAdd}
-              className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center"
-            >
-              <Plus size={24} />
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100">
-            <h3 className="font-bold text-slate-800">Eventos Activos</h3>
-          </div>
-
-          <div className="divide-y divide-slate-100">
-            {events.map((event) => (
-              <div
-                key={event.id}
-                className="p-4 flex items-center justify-between hover:bg-slate-50"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                    <Calendar size={18} />
-                  </div>
-
-                  <div>
-                    <p className="font-semibold text-slate-900">{event.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {new Date(event.date).toLocaleString("es-ES", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setEventToDelete(event)}
-                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                >
-                  <Plus size={18} className="rotate-45" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-};
 
 export default App;

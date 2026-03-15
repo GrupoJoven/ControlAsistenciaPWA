@@ -90,8 +90,10 @@ const StudentList: React.FC<StudentListProps> = ({
 
 
   const filteredStudents = useMemo(() => {
-    if (filterGroupId === 'all') return students;
-    return students.filter(s => s.groupId === filterGroupId);
+    if (filterGroupId === 'all') return students.sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
+    return students
+      .filter(s => s.groupId === filterGroupId)
+      .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
   }, [students, filterGroupId]);
 
   const getFullHistory = (student: Student) => {
