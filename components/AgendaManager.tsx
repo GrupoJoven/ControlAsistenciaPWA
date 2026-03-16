@@ -87,7 +87,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ events, onAdd, onRemove }
 
             <input
               type="datetime-local"
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl w-full sm:w-auto max-w-full"
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl w-full sm:w-auto max-w-[300px] sm:max-w-full"
               value={newDateTime}
               onChange={(e) => setNewDateTime(e.target.value)}
             />
