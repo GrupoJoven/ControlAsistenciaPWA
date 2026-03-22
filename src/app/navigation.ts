@@ -12,6 +12,7 @@ import {
   User,
   Users,
   Briefcase,
+  HardDrive,
   LucideIcon,
 } from "lucide-react";
 import { View } from "../types/app";
@@ -41,6 +42,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     items: [
       { view: "dashboard", label: "Resumen", icon: BarChart3 },
       { view: "school-calendar", label: "Calendario escolar", icon: CalendarDays },
+      { view: "drive", label: "Drive", icon: HardDrive },
     ],
   },
   {

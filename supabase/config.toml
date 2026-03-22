@@ -470,3 +470,113 @@ entrypoint = "./functions/send-birthday-pushes/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-birthday-pushes/*.html" ]
+
+[functions.google-drive-auth-start]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-auth-start/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-auth-start/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-auth-start/*.html" ]
+
+[functions.google-drive-auth-callback]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-auth-callback/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-auth-callback/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-auth-callback/*.html" ]
+
+[functions.google-drive-list-files]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-list-files/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-list-files/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-list-files/*.html" ]
+
+[functions.google-drive-rename-item]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-rename-item/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-rename-item/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-rename-item/*.html" ]
+
+[functions.google-drive-upload-file]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-upload-file/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-upload-file/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-upload-file/*.html" ]
+
+[functions.google-drive-create-folder]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-create-folder/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-create-folder/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-create-folder/*.html" ]
+
+[functions.google-drive-search-recursive]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-search-recursive/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-search-recursive/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-search-recursive/*.html" ]
+
+[functions.google-drive-initial-index]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-initial-index/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-initial-index/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-initial-index/*.html" ]
+
+[functions.drive-index-search]
+enabled = true
+verify_jwt = false
+import_map = "./functions/drive-index-search/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/drive-index-search/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/drive-index-search/*.html" ]
+
+[functions.google-drive-sync-changes]
+enabled = true
+verify_jwt = false
+import_map = "./functions/google-drive-sync-changes/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/google-drive-sync-changes/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/google-drive-sync-changes/*.html" ]

@@ -55,6 +55,7 @@ import StudentBirthdayPopup from './components/StudentBirthdayPopup';
 import IncidentsManager from './components/IncidentsManager';
 import AccountSettings from './components/AccountSettings';
 import MyAccount from './components/MyAccount';
+import Drive from './components/Drive';
 import AgendaManager from './components/AgendaManager';
 import AppSidebar from "./components/layout/AppSidebar";
 import AppHeader from "./components/layout/AppHeader";
@@ -100,6 +101,8 @@ const App: React.FC = () => {
   const [pushSupported, setPushSupported] = useState(false);
   const [pushStatusChecked, setPushStatusChecked] = useState(false);
   const [dismissedPushBanner, setDismissedPushBanner] = useState(false);
+
+
 
   
   const blockIfOffline = (actionLabel = "realizar esta acción") => {
@@ -1441,6 +1444,11 @@ const App: React.FC = () => {
           )}
           {currentView === 'school-calendar' && (
             <SchoolCalendar classDays={classDays} />
+          )}
+          {currentView === 'drive' && (
+            <Drive
+              isOnline={isOnline}
+            />
           )}
 
           {currentView === 'incidents' && (

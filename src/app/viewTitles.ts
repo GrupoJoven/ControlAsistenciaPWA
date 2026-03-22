@@ -14,6 +14,7 @@ export const VIEW_TITLES: Record<View, string> = {
   agenda: "Planificador de Eventos",
   reports: "Informes pastorales con IA",
   "class-days": "Calendario de Días Lectivos",
+  drive: "Drive Grupo Joven",
   account: "Seguridad de la Cuenta",
   "my-account": "Mi Cuenta",
 };
