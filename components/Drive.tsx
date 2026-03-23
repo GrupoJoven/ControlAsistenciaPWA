@@ -195,10 +195,17 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
   };
 
   useEffect(() => {
+    if (!isOnline) return;
     void loadConnection();
-  }, []);
+  }, [isOnline]);
 
   useEffect(() => {
+    if (!isOnline) {
+      setItems([]);
+      setCurrentFolderId(null);
+      setFolderStack([]);
+      return;
+    }
     if (isConnected) {
       setFolderStack([]);
       void loadFiles(null);
@@ -207,7 +214,7 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
       setCurrentFolderId(null);
       setFolderStack([]);
     }
-  }, [isConnected]);
+  }, [isConnected, isOnline]);
 
   const handleLink = async () => {
     if (!isOnline) {
@@ -233,6 +240,20 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
       void handleAutoSyncDriveChanges();
     }
   }, [loadingConnection, isConnected, autoSyncDone, isOnline]);
+
+  useEffect(() => {
+    if (!isOnline) {
+      setLoadingFiles(false);
+      setSearching(false);
+      setUploading(false);
+      setCreatingFolder(false);
+      setRenaming(false);
+      setSyncingDrive(false);
+      setIndexingDrive(false);
+      setFilesError(null);
+      setConnectionError(null);
+    }
+  }, [isOnline]);
 
   const handleOpenFolder = async (item: DriveItem) => {
     setFolderStack((prev) => [...prev, { id: item.id, name: item.name || "Carpeta" }]);
@@ -462,7 +483,22 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
           </div>
         </div>
   
-        {loadingConnection ? (
+        {!isOnline ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+              <div className="flex items-center gap-2 text-amber-700 font-semibold text-sm">
+                <AlertCircle size={16} />
+                Google Drive no disponible sin conexión
+              </div>
+              <p className="text-sm text-amber-800 mt-2">
+                No se puede acceder al contenido de Drive porque ahora mismo no hay internet.
+              </p>
+              <p className="text-xs text-amber-700 mt-2">
+                Cuando vuelva la conexión, esta sección volverá a cargar la información automáticamente.
+              </p>
+            </div>
+          </div>
+        ) : loadingConnection ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
             Comprobando conexión con Google Drive...
           </div>
