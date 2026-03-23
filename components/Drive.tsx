@@ -11,6 +11,15 @@ import {
   FolderPlus,
   Search,
   X,
+  FileSpreadsheet,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileCode,
+  FileJson,
+  FileSymlink,
+  File,
 } from "lucide-react";
 import {
   getGoogleDriveConnection,
@@ -40,12 +49,83 @@ function formatDate(value: string | null | undefined) {
   return d.toLocaleString("es-ES");
 }
 
-function getFileTypeLabel(item: DriveItem) {
-  if (item.mimeType === GOOGLE_FOLDER_MIME) return "Carpeta";
-  if (item.mimeType.startsWith("application/vnd.google-apps.document")) return "Google Docs";
-  if (item.mimeType.startsWith("application/vnd.google-apps.spreadsheet")) return "Google Sheets";
-  if (item.mimeType.startsWith("application/vnd.google-apps.presentation")) return "Google Slides";
-  return "Archivo";
+function getFileIcon(item: DriveItem | IndexedDriveSearchResult) {
+  const mimeType = "mimeType" in item ? item.mimeType : item.mime_type;
+
+  if (mimeType === GOOGLE_FOLDER_MIME) {
+    return <Folder size={18} className="text-amber-500 shrink-0" />;
+  }
+
+  if (mimeType === "application/pdf") {
+    return <FileText size={18} className="text-red-500 shrink-0" />;
+  }
+
+  if (
+    mimeType === "application/vnd.google-apps.document" ||
+    mimeType === "application/msword" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    mimeType === "text/plain"
+  ) {
+    return <FileText size={18} className="text-blue-500 shrink-0" />;
+  }
+
+  if (
+    mimeType === "application/vnd.google-apps.spreadsheet" ||
+    mimeType === "application/vnd.ms-excel" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mimeType === "text/csv"
+  ) {
+    return <FileSpreadsheet size={18} className="text-emerald-600 shrink-0" />;
+  }
+
+  if (
+    mimeType === "application/vnd.google-apps.presentation" ||
+    mimeType === "application/vnd.ms-powerpoint" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  ) {
+    return <FileSymlink size={18} className="text-orange-500 shrink-0" />;
+  }
+
+  if (mimeType.startsWith("image/")) {
+    return <FileImage size={18} className="text-pink-500 shrink-0" />;
+  }
+
+  if (mimeType.startsWith("video/")) {
+    return <FileVideo size={18} className="text-violet-500 shrink-0" />;
+  }
+
+  if (mimeType.startsWith("audio/")) {
+    return <FileAudio size={18} className="text-cyan-500 shrink-0" />;
+  }
+
+  if (
+    mimeType === "application/zip" ||
+    mimeType === "application/x-zip-compressed" ||
+    mimeType === "application/x-rar-compressed" ||
+    mimeType === "application/x-7z-compressed"
+  ) {
+    return <FileArchive size={18} className="text-yellow-600 shrink-0" />;
+  }
+
+  if (
+    mimeType === "application/json" ||
+    mimeType === "text/json"
+  ) {
+    return <FileJson size={18} className="text-slate-600 shrink-0" />;
+  }
+
+  if (
+    mimeType.includes("javascript") ||
+    mimeType.includes("typescript") ||
+    mimeType.includes("python") ||
+    mimeType.includes("html") ||
+    mimeType.includes("css") ||
+    mimeType.includes("xml")
+  ) {
+    return <FileCode size={18} className="text-indigo-500 shrink-0" />;
+  }
+
+  return <File size={18} className="text-slate-500 shrink-0" />;
 }
 
 const Drive: React.FC<DriveProps> = ({ isOnline }) => {
@@ -650,9 +730,7 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                 {items.length > 0 && (
                   <div className="overflow-hidden rounded-2xl border border-slate-200">
                     <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
-                      <div className="col-span-6">Nombre</div>
-                      <div className="col-span-2">Tipo</div>
-                      <div className="col-span-3">Modificado</div>
+                      <div className="col-span-11">Nombre</div>
                       <div className="col-span-1 text-right">Acciones</div>
                     </div>
   
@@ -660,18 +738,14 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                       {items.map((item) => {
                         const isFolder = item.mimeType === GOOGLE_FOLDER_MIME;
                         const canRename = !!item.capabilities?.canRename;
-                        const icon = isFolder ? (
-                          <Folder size={18} className="text-amber-500 shrink-0" />
-                        ) : (
-                          <FileText size={18} className="text-slate-500 shrink-0" />
-                        );
+                        const icon = getFileIcon(item);
   
                         return (
                           <div
                             key={item.id}
                             className="grid grid-cols-12 gap-3 px-4 py-4 items-center bg-white"
                           >
-                            <div className="col-span-6 min-w-0">
+                            <div className="col-span-11 min-w-0">
                               <div className="flex items-center gap-3 min-w-0">
                                 {icon}
                                 <div className="min-w-0">
@@ -735,18 +809,12 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                                   <div className="text-xs text-slate-500 truncate">
                                     {item.owners?.[0]?.displayName || item.owners?.[0]?.emailAddress || "-"}
                                   </div>
+                                  <div className="text-xs text-slate-400 truncate">
+                                    Modificado: {formatDate(item.modifiedTime)}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-  
-                            <div className="col-span-2 text-sm text-slate-600">
-                              {getFileTypeLabel(item)}
-                            </div>
-  
-                            <div className="col-span-3 text-sm text-slate-600">
-                              {formatDate(item.modifiedTime)}
-                            </div>
-  
+                            </div>  
                             <div className="col-span-1 flex items-center justify-end gap-2">
                               {canRename && editingItemId !== item.id && (
                                 <button
@@ -785,38 +853,20 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                 {searchResults.length > 0 && (
                   <div className="overflow-hidden rounded-2xl border border-slate-200">
                     <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
-                      <div className="col-span-4">Nombre</div>
-                      <div className="col-span-2">Tipo</div>
-                      <div className="col-span-4">Ruta</div>
-                      <div className="col-span-2">Modificado</div>
+                      <div className="col-span-5">Nombre</div>
+                      <div className="col-span-7">Ruta</div>
                     </div>
   
                     <div className="divide-y divide-slate-200">
                       {searchResults.map((item) => {
                         const isFolder = item.is_folder;
-                        const icon = isFolder ? (
-                          <Folder size={18} className="text-amber-500 shrink-0" />
-                        ) : (
-                          <FileText size={18} className="text-slate-500 shrink-0" />
-                        );
-
-                        const typeLabel =
-                          item.mime_type === "application/vnd.google-apps.folder"
-                            ? "Carpeta"
-                            : item.mime_type.startsWith("application/vnd.google-apps.document")
-                              ? "Google Docs"
-                              : item.mime_type.startsWith("application/vnd.google-apps.spreadsheet")
-                                ? "Google Sheets"
-                                : item.mime_type.startsWith("application/vnd.google-apps.presentation")
-                                  ? "Google Slides"
-                                  : "Archivo";
-
+                        const icon = getFileIcon(item);
                         return (
                           <div
                             key={item.file_id}
                             className="grid grid-cols-12 gap-3 px-4 py-4 items-center bg-white"
                           >
-                            <div className="col-span-4 min-w-0">
+                            <div className="col-span-5 min-w-0">
                               <div className="flex items-center gap-3 min-w-0">
                                 {icon}
                                 <div className="min-w-0">
@@ -852,20 +902,14 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                                   <div className="text-xs text-slate-500 truncate">
                                     {item.owner_display_name || item.owner_email || "-"}
                                   </div>
+                                  <div className="text-xs text-slate-400 truncate">
+                                    Modificado: {formatDate(item.modified_time)}
+                                  </div>
                                 </div>
                               </div>
                             </div>
-
-                            <div className="col-span-2 text-sm text-slate-600">
-                              {typeLabel}
-                            </div>
-
-                            <div className="col-span-4 text-xs text-slate-500 truncate" title={item.path}>
+                            <div className="col-span-7 text-xs text-slate-500 truncate" title={item.path}>
                               {item.path}
-                            </div>
-
-                            <div className="col-span-2 text-sm text-slate-600">
-                              {formatDate(item.modified_time)}
                             </div>
                           </div>
                         );
