@@ -30,6 +30,12 @@ type Props = {
 
 const normalizeDate = (d: string) => String(d).slice(0, 10);
 
+const formatIncidentDateForNotification = (d: string) => {
+  const value = normalizeDate(d);
+  if (!value) return "";
+  return new Date(`${value}T00:00:00`).toLocaleDateString("es-ES");
+};
+
 const buildIncidentsCacheKey = (
   currentUserId: string,
   isCoordinator: boolean,
@@ -267,6 +273,175 @@ const IncidentsManager: React.FC<Props> = ({
     setIsCreateOpen(true);
   };
 
+  const sendIncidentPushNotifications = async (studentId: string) => {
+    const student = studentsById.get(studentId);
+    const incidentGroupId = student?.groupId;
+
+    if (!incidentGroupId) {
+      console.warn("[incidents] No se pudo determinar el grupo del alumno para enviar la notificación.");
+      return;
+    }
+
+    const groupLinkedProfileIds = [
+      ...new Set(
+        groupCatechistLinks
+          .filter((link) => link.group_id === incidentGroupId)
+          .map((link) => link.profile_id)
+      ),
+    ];
+
+    const coordinatorIds = [
+      ...new Set(
+        users
+          .filter((u) => u.role === "coordinator")
+          .map((u) => u.id)
+      ),
+    ];
+
+    // Prioridad: si el coordinador pertenece al grupo del participante,
+    // entra en "tu grupo" y NO debe recibir también la de "otro grupo".
+    const recipientsMyGroup = groupLinkedProfileIds;
+    const recipientsOtherGroup = coordinatorIds.filter(
+      (id) => !recipientsMyGroup.includes(id)
+    );
+
+    const jobs: Promise<any>[] = [];
+
+    if (recipientsMyGroup.length > 0) {
+      jobs.push(
+        supabase.functions.invoke("send-push-notifications", {
+          body: {
+            title: "Nueva incidencia registrada",
+            body: "Nueva incidencia registrada para un participante de tu grupo. Accede para ver más información.",
+            url: "/",
+            userIds: recipientsMyGroup,
+          },
+        })
+      );
+    }
+
+    if (recipientsOtherGroup.length > 0) {
+      jobs.push(
+        supabase.functions.invoke("send-push-notifications", {
+          body: {
+            title: "Nueva incidencia registrada",
+            body: "Nueva incidencia registrada para un participante de otro grupo. Accede para ver más información.",
+            url: "/",
+            userIds: recipientsOtherGroup,
+          },
+        })
+      );
+    }
+
+    const results = await Promise.allSettled(jobs);
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[incidents] Error inesperado enviando push:", result.reason);
+        continue;
+      }
+
+      if (result.value?.error) {
+        console.error("[incidents] Error enviando push:", result.value.error);
+      }
+    }
+  };
+
+  const sendIncidentDeletedPushNotifications = async (row: IncidentRow) => {
+    const student =
+      row.student ??
+      studentsById.get(row.student_id);
+
+    const incidentGroupId =
+      row.student?.group_id ??
+      student?.groupId;
+
+    if (!incidentGroupId) {
+      console.warn("[incidents] No se pudo determinar el grupo de la incidencia borrada para enviar la notificación.");
+      return;
+    }
+
+    const studentName =
+      row.student?.name ??
+      student?.name ??
+      "Alumno desconocido";
+
+    const deletedBy =
+      currentUser.name?.trim() || "Un usuario";
+
+    const incidentDateText = formatIncidentDateForNotification(row.incident_date);
+
+    const groupLinkedProfileIds = [
+      ...new Set(
+        groupCatechistLinks
+          .filter((link) => link.group_id === incidentGroupId)
+          .map((link) => link.profile_id)
+      ),
+    ];
+
+    const coordinatorIds = [
+      ...new Set(
+        users
+          .filter((u) => u.role === "coordinator")
+          .map((u) => u.id)
+      ),
+    ];
+
+    const recipientsMyGroup = groupLinkedProfileIds;
+    const recipientsOtherGroup = coordinatorIds.filter(
+      (id) => !recipientsMyGroup.includes(id)
+    );
+
+    const myGroupBody =
+      `${deletedBy} ha borrado una incidencia de ${studentName} ` +
+      `(fecha: ${incidentDateText}).`;
+
+    const otherGroupBody =
+      `${deletedBy} ha borrado una incidencia de un participante de otro grupo: ${studentName} ` +
+      `(fecha: ${incidentDateText}).`;
+
+    const jobs: Promise<any>[] = [];
+
+    if (recipientsMyGroup.length > 0) {
+      jobs.push(
+        supabase.functions.invoke("send-push-notifications", {
+          body: {
+            title: "Incidencia eliminada",
+            body: myGroupBody,
+            url: "/",
+            userIds: recipientsMyGroup,
+          },
+        })
+      );
+    }
+
+    if (recipientsOtherGroup.length > 0) {
+      jobs.push(
+        supabase.functions.invoke("send-push-notifications", {
+          body: {
+            title: "Incidencia eliminada",
+            body: otherGroupBody,
+            url: "/",
+            userIds: recipientsOtherGroup,
+          },
+        })
+      );
+    }
+
+    const results = await Promise.allSettled(jobs);
+
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[incidents] Error inesperado enviando push de borrado:", result.reason);
+        continue;
+      }
+
+      if (result.value?.error) {
+        console.error("[incidents] Error enviando push de borrado:", result.value.error);
+      }
+    }
+  };
+
   const createIncident = async () => {
     if (!isOnline) {
       setErrorMsg("No hay conexión. No se pueden crear incidencias hasta que vuelva internet.");
@@ -308,6 +483,12 @@ const IncidentsManager: React.FC<Props> = ({
       const { error } = await supabase.from("incidents").insert(payload);
       if (error) throw error;
 
+      try {
+        await sendIncidentPushNotifications(sid);
+      } catch (pushError) {
+        console.error("[incidents] La incidencia se creó, pero falló el envío de push:", pushError);
+      }
+
       setIsCreateOpen(false);
       await fetchIncidents();
     } catch (e: any) {
@@ -326,7 +507,7 @@ const IncidentsManager: React.FC<Props> = ({
     return isCoordinator || r.profile_id === currentUser.id;
   };
 
-  const deleteIncident = async (id: string) => {
+  const deleteIncident = async (row: IncidentRow) => {
     if (!isOnline) {
       setErrorMsg("No hay conexión. No se pueden eliminar incidencias hasta que vuelva internet.");
       return;
@@ -336,8 +517,19 @@ const IncidentsManager: React.FC<Props> = ({
     setLoading(true);
     setErrorMsg("");
     try {
-      const { error } = await supabase.from("incidents").delete().eq("incident_id", id);
+      const { error } = await supabase
+        .from("incidents")
+        .delete()
+        .eq("incident_id", row.incident_id);
+
       if (error) throw error;
+
+      try {
+        await sendIncidentDeletedPushNotifications(row);
+      } catch (pushError) {
+        console.error("[incidents] La incidencia se borró, pero falló el envío de push de borrado:", pushError);
+      }
+
       await fetchIncidents();
     } catch (e: any) {
       setErrorMsg(e?.message ?? "Error eliminando incidencia.");
@@ -539,7 +731,7 @@ const IncidentsManager: React.FC<Props> = ({
                     <div className="flex items-center gap-2">
                       {canDelete(r) && (
                         <button
-                          onClick={() => void deleteIncident(r.incident_id)}
+                          onClick={() => void deleteIncident(r)}
                           className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 flex items-center gap-2"
                         >
                           <Trash2 size={16} />

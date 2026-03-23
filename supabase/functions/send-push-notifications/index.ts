@@ -1,6 +1,5 @@
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import webpush from "npm:web-push";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 type PushRow = {
   id: string;
@@ -14,7 +13,24 @@ type RequestBody = {
   title: string;
   body: string;
   url?: string;
+  userIds?: string[];
 };
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY");
+const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY");
+
+if (!supabaseUrl) throw new Error("Falta SUPABASE_URL");
+if (!serviceRoleKey) throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY");
+if (!vapidPublicKey) throw new Error("Falta VAPID_PUBLIC_KEY");
+if (!vapidPrivateKey) throw new Error("Falta VAPID_PRIVATE_KEY");
+
+webpush.setVapidDetails(
+  "mailto:no-reply@sanpas.es",
+  vapidPublicKey,
+  vapidPrivateKey
+);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,31 +39,17 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY")!;
-const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY")!;
+const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-webpush.setVapidDetails(
-  "mailto:no-reply@sanpas.es",
-  vapidPublicKey,
-  vapidPrivateKey
-);
-
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
     return new Response(
       JSON.stringify({ error: "Method not allowed" }),
-      {
-        status: 405,
-        headers: corsHeaders,
-      }
+      { status: 405, headers: corsHeaders }
     );
   }
 
@@ -57,30 +59,41 @@ serve(async (req) => {
     if (!body?.title || !body?.body) {
       return new Response(
         JSON.stringify({ error: "Faltan title o body" }),
-        {
-          status: 400,
-          headers: corsHeaders,
-        }
+        { status: 400, headers: corsHeaders }
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const targetUserIds = Array.isArray(body.userIds)
+      ? [...new Set(body.userIds.filter((v) => typeof v === "string" && v.trim().length > 0))]
+      : [];
 
-    const { data: subscriptions, error } = await supabase
+    let subsQuery = supabase
       .from("push_subscriptions")
       .select("id, user_id, endpoint, p256dh, auth");
 
-    if (error) throw error;
+    if (targetUserIds.length > 0) {
+      subsQuery = subsQuery.in("user_id", targetUserIds);
+    }
+
+    const { data: subscriptions, error: subsError } = await subsQuery;
+
+    if (subsError) {
+      throw new Error(`Error cargando suscripciones: ${subsError.message}`);
+    }
 
     const rows = (subscriptions ?? []) as PushRow[];
 
     if (rows.length === 0) {
       return new Response(
-        JSON.stringify({ sent: 0, removed: 0, total: 0 }),
-        {
-          status: 200,
-          headers: corsHeaders,
-        }
+        JSON.stringify({
+          ok: true,
+          sent: 0,
+          removed: 0,
+          total: 0,
+          filtered_by_user_ids: targetUserIds.length > 0,
+          requested_user_ids: targetUserIds,
+        }),
+        { status: 200, headers: corsHeaders }
       );
     }
 
@@ -91,63 +104,85 @@ serve(async (req) => {
       icon: "/icons/icon-192.png",
     });
 
+    const invalidSubscriptionIds: string[] = [];
+    const successfulSubscriptionIds: string[] = [];
     let sent = 0;
-    let removed = 0;
 
     for (const row of rows) {
-      const subscription = {
-        endpoint: row.endpoint,
-        keys: {
-          p256dh: row.p256dh,
-          auth: row.auth,
-        },
-      };
-
       try {
-        await webpush.sendNotification(subscription, payload);
-        sent += 1;
+        await webpush.sendNotification(
+          {
+            endpoint: row.endpoint,
+            keys: {
+              p256dh: row.p256dh,
+              auth: row.auth,
+            },
+          },
+          payload
+        );
 
-        await supabase
-          .from("push_subscriptions")
-          .update({ last_used_at: new Date().toISOString() })
-          .eq("id", row.id);
+        sent += 1;
+        successfulSubscriptionIds.push(row.id);
       } catch (err: any) {
-        const statusCode = err?.statusCode;
+        const statusCode = err?.statusCode ?? err?.status ?? null;
+
+        console.error("Error enviando push:", {
+          subscription_id: row.id,
+          user_id: row.user_id,
+          statusCode,
+          message: err?.message ?? String(err),
+        });
 
         if (statusCode === 404 || statusCode === 410) {
-          await supabase
-            .from("push_subscriptions")
-            .delete()
-            .eq("id", row.id);
-          removed += 1;
-        } else {
-          console.error("Error enviando push a", row.id, err);
+          invalidSubscriptionIds.push(row.id);
         }
+      }
+    }
+
+    if (invalidSubscriptionIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("push_subscriptions")
+        .delete()
+        .in("id", invalidSubscriptionIds);
+
+      if (deleteError) {
+        console.error("Error eliminando suscripciones inválidas:", deleteError);
+      }
+    }
+
+    if (successfulSubscriptionIds.length > 0) {
+      const { error: touchError } = await supabase
+        .from("push_subscriptions")
+        .update({ last_used_at: new Date().toISOString() })
+        .in("id", successfulSubscriptionIds);
+
+      if (touchError) {
+        console.error("Error actualizando last_used_at:", touchError);
       }
     }
 
     return new Response(
       JSON.stringify({
+        ok: true,
         sent,
-        removed,
+        removed: invalidSubscriptionIds.length,
         total: rows.length,
+        filtered_by_user_ids: targetUserIds.length > 0,
+        requested_user_ids: targetUserIds,
       }),
-      {
-        status: 200,
-        headers: corsHeaders,
-      }
+      { status: 200, headers: corsHeaders }
     );
   } catch (error: any) {
-    console.error(error);
+    console.error("send-push-notifications fatal error:", {
+      message: error?.message ?? String(error),
+      stack: error?.stack ?? null,
+    });
 
     return new Response(
       JSON.stringify({
         error: error?.message ?? "Error interno",
       }),
-      {
-        status: 500,
-        headers: corsHeaders,
-      }
+      { status: 500, headers: corsHeaders }
     );
   }
 });
