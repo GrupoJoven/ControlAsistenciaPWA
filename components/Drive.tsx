@@ -731,7 +731,7 @@ const Drive: React.FC<DriveProps> = ({ isOnline }) => {
                   <div className="overflow-hidden rounded-2xl border border-slate-200">
                     <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
                       <div className="col-span-11">Nombre</div>
-                      <div className="col-span-1 text-right">Acciones</div>
+                      
                     </div>
   
                     <div className="divide-y divide-slate-200">
