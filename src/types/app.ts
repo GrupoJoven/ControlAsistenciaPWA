@@ -2,6 +2,7 @@ export type View =
   | "dashboard"
   | "school-calendar"
   | "attendance"
+  | "history"
   | "students"
   | "services"
   | "incidents"

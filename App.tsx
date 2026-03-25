@@ -41,6 +41,7 @@ import {
 import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, AttendanceStatus, CatechistAttendanceRecord } from './types';
 import Dashboard from './components/Dashboard';
 import AttendanceTracker from './components/AttendanceTracker';
+import Historial from './components/Historial';
 import StudentList from './components/StudentList';
 import Reports from './components/Reports';
 import Login from './components/Login';
@@ -537,54 +538,83 @@ const App: React.FC = () => {
   };
 
   const isSearchView = ['students', 'coordinator-groups', 'catechists'].includes(currentView);
-  const updateStudentAttendance = async (
+  const persistStudentAttendance = async (
+    date: string,
     studentId: string,
     type: "catechism" | "mass",
     status: AttendanceStatus
   ) => {
     if (blockIfOffline("guardar la asistencia")) return;
-    const today = getTodayStr();
-  
-    // 1) Lee desde Supabase el registro actual (fuente de verdad)
+
     const { data: current, error: readErr } = await supabase
       .from("student_attendance")
       .select("catechism, mass")
       .eq("student_id", studentId)
-      .eq("date", today)
+      .eq("date", date)
       .maybeSingle();
-  
+
     if (readErr) {
       alert("Error leyendo asistencia actual: " + readErr.message);
       return;
     }
-  
+
     const next = {
       student_id: studentId,
-      date: today,
+      date,
       catechism: type === "catechism" ? status : (current?.catechism ?? "absent"),
       mass: type === "mass" ? status : (current?.mass ?? "absent"),
     };
-  
+
     const { error } = await supabase
       .from("student_attendance")
       .upsert(next, { onConflict: "student_id,date" });
-  
+
     if (error) {
       alert("Error guardando asistencia: " + error.message);
       return;
     }
 
-    // 2) actualiza estado local (optimista)
     setStudents(prev =>
       prev.map(st => {
         if (st.id !== studentId) return st;
+
         const history = [...(st.attendanceHistory ?? [])];
-        const idx = history.findIndex(h => h.date === today);
-        if (idx >= 0) history[idx] = { date: today, catechism: next.catechism as any, mass: next.mass as any };
-        else history.push({ date: today, catechism: next.catechism as any, mass: next.mass as any });
+        const idx = history.findIndex(h => h.date === date);
+
+        if (idx >= 0) {
+          history[idx] = {
+            date,
+            catechism: next.catechism as AttendanceStatus,
+            mass: next.mass as AttendanceStatus,
+          };
+        } else {
+          history.push({
+            date,
+            catechism: next.catechism as AttendanceStatus,
+            mass: next.mass as AttendanceStatus,
+          });
+        }
+
         return { ...st, attendanceHistory: history };
       })
     );
+  };
+
+  const updateStudentAttendance = async (
+    studentId: string,
+    type: "catechism" | "mass",
+    status: AttendanceStatus
+  ) => {
+    await persistStudentAttendance(getTodayStr(), studentId, type, status);
+  };
+
+  const updateHistoricalStudentAttendance = async (
+    date: string,
+    studentId: string,
+    type: "catechism" | "mass",
+    status: AttendanceStatus
+  ) => {
+    await persistStudentAttendance(date, studentId, type, status);
   };
 
 
@@ -1439,6 +1469,15 @@ const App: React.FC = () => {
               classDays={classDays}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
+              isOnline={isOnline}
+            />
+          )}
+          {currentView === 'history' && (
+            <Historial
+              students={myCatecumenos}
+              onUpdate={updateHistoricalStudentAttendance}
+              classDays={classDays}
+              warningMessage={warningMessage}
               isOnline={isOnline}
             />
           )}

@@ -51,6 +51,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     accent: "default",
     items: [
       { view: "attendance", label: "Pasar Lista", icon: CheckCircle2 },
+      { view: "history", label: "Histórico", icon: CalendarDays },
       { view: "students", label: "Mis Catecúmenos", icon: Users },
       { view: "services", label: "Servicios", icon: ClipboardList },
       { view: "incidents", label: "Incidencias", icon: TriangleAlert },
