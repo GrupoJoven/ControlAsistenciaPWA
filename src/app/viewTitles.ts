@@ -5,6 +5,7 @@ export const VIEW_TITLES: Record<View, string> = {
   "school-calendar": "Calendario escolar",
   attendance: "Control de Asistencia",
   history: "Histórico de asistencia",
+  "group-history": "Histórico grupos",
   students: "Mis Catecúmenos",
   services: "Servicios",
   incidents: "Gestión de incidencias",

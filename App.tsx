@@ -42,6 +42,7 @@ import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, Atten
 import Dashboard from './components/Dashboard';
 import AttendanceTracker from './components/AttendanceTracker';
 import Historial from './components/Historial';
+import HistoricoGrupos from './components/HistoricoGrupos';
 import StudentList from './components/StudentList';
 import Reports from './components/Reports';
 import Login from './components/Login';
@@ -1478,6 +1479,16 @@ const App: React.FC = () => {
               onUpdate={updateHistoricalStudentAttendance}
               classDays={classDays}
               warningMessage={warningMessage}
+              warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
+              isOnline={isOnline}
+            />
+          )}
+          {currentView === 'group-history' && currentUser.role === 'coordinator' && (
+            <HistoricoGrupos
+              groups={groups}
+              students={students}
+              classDays={classDays}
+              onUpdate={updateHistoricalStudentAttendance}
               isOnline={isOnline}
             />
           )}

@@ -65,6 +65,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
       { view: "coordinator-groups", label: "Todos los Niños", icon: ShieldCheck, roles: ["coordinator"] },
       { view: "catechists", label: "Registro Catequistas", icon: Briefcase, roles: ["coordinator"] },
       { view: "catechist-attendance", label: "Asistencia Equipo", icon: CheckCircle2, roles: ["coordinator"] },
+      { view: "group-history", label: "Histórico Grupos", icon: CalendarDays, roles: ["coordinator"] },
       { view: "coordinator-edit-groups", label: "Editar Grupos", icon: Settings, roles: ["coordinator"] },
       { view: "class-days", label: "Gestión de calendario", icon: CalendarDays, roles: ["coordinator"] },
       { view: "agenda", label: "Gestión Agenda", icon: Calendar, roles: ["coordinator"] },

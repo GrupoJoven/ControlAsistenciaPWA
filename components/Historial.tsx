@@ -22,6 +22,9 @@ interface HistorialProps {
   warningMessage?: string;
   warningType?: "no-group" | "no-students";
   isOnline: boolean;
+  parentLabel?: string;
+  parentBackLabel?: string;
+  onParentBack?: () => void;
 }
 
 const Historial: React.FC<HistorialProps> = ({
@@ -29,9 +32,14 @@ const Historial: React.FC<HistorialProps> = ({
   classDays,
   onUpdate,
   warningMessage,
+  warningType,
   isOnline,
+  parentLabel,
+  parentBackLabel,
+  onParentBack,
 }) => {
   const todayRaw = getTodayStr();
+  const hasNoGroupAssigned = warningType === "no-group";
 
   const [showOnlySuspicious, setShowOnlySuspicious] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -59,6 +67,20 @@ const Historial: React.FC<HistorialProps> = ({
     return "bg-slate-100 text-slate-400 hover:bg-slate-200";
   };
 
+  const hasParticipationOnDay = (student: Student, day: string) => {
+    const record = student.attendanceHistory?.find((record) => record.date === day);
+
+    if (!record) return false;
+
+    const catechismParticipated =
+      record.catechism === "present" || record.catechism === "late";
+
+    const massParticipated =
+      record.mass === "present" || record.mass === "late";
+
+    return catechismParticipated || massParticipated;
+  };
+
   const historicalDays = useMemo(() => {
     return [...classDays]
       .filter((day) => day <= todayRaw)
@@ -71,21 +93,21 @@ const Historial: React.FC<HistorialProps> = ({
     const result = historicalDays.filter((day) => {
       if (day >= todayRaw) return false;
 
-      return students.every(
-        (student) =>
-          !student.attendanceHistory?.some((record) => record.date === day)
-      );
+      return students.every((student) => !hasParticipationOnDay(student, day));
     });
 
     return new Set(result);
   }, [historicalDays, students, todayRaw]);
 
   const visibleDays = useMemo(() => {
+    if (hasNoGroupAssigned) return [];
+
     if (showOnlySuspicious) {
       return historicalDays.filter((day) => suspiciousDays.has(day));
     }
+
     return historicalDays;
-  }, [historicalDays, showOnlySuspicious, suspiciousDays]);
+  }, [historicalDays, showOnlySuspicious, suspiciousDays, hasNoGroupAssigned]);
 
   const selectedDatePretty = selectedDate ? formatPrettyDate(selectedDate) : "";
 
@@ -111,29 +133,47 @@ const Historial: React.FC<HistorialProps> = ({
         <div className="bg-gradient-to-r from-indigo-700 to-blue-600 rounded-2xl p-6 lg:p-8 text-white shadow-lg">
           <div className="flex items-start justify-between gap-4 flex-col sm:flex-row">
             <div>
+              {onParentBack && (
+                <button
+                  onClick={onParentBack}
+                  className="mb-4 inline-flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                  <ChevronLeft size={16} />
+                  {parentBackLabel ?? "Volver"}
+                </button>
+              )}
+
               <h2 className="text-xl lg:text-2xl font-bold flex items-center gap-2">
                 <CalendarDays size={24} className="shrink-0" />
                 Histórico de asistencia
               </h2>
+
               <p className="text-indigo-100 opacity-90 text-xs lg:text-sm mt-1">
                 Aquí puedes revisar días lectivos anteriores y reabrir su
                 asistencia.
               </p>
-            </div>
 
-            <button
-              onClick={() => setShowOnlySuspicious((prev) => !prev)}
-              className={`font-bold text-[11px] sm:text-xs px-4 py-2 rounded-xl transition-colors border flex items-center gap-2 ${
-                showOnlySuspicious
-                  ? "bg-white text-indigo-700 border-white"
-                  : "bg-white/15 hover:bg-white/25 border-white/20 text-white"
-              }`}
-            >
-              <Filter size={16} />
-              {showOnlySuspicious
-                ? "Mostrando sospechosos"
-                : "Filtrar por días sospechosos"}
-            </button>
+              {parentLabel && (
+                <p className="text-white text-xs lg:text-sm font-bold mt-3">
+                  Grupo: {parentLabel}
+                </p>
+              )}
+            </div>
+            {!hasNoGroupAssigned && (
+              <button
+                onClick={() => setShowOnlySuspicious((prev) => !prev)}
+                className={`font-bold text-[11px] sm:text-xs px-4 py-2 rounded-xl transition-colors border flex items-center gap-2 ${
+                  showOnlySuspicious
+                    ? "bg-white text-indigo-700 border-white"
+                    : "bg-white/15 hover:bg-white/25 border-white/20 text-white"
+                }`}
+              >
+                <Filter size={16} />
+                {showOnlySuspicious
+                  ? "Mostrando sospechosos"
+                  : "Filtrar por días sospechosos"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -141,7 +181,8 @@ const Historial: React.FC<HistorialProps> = ({
           <div className="px-4 lg:px-6 py-4 border-b border-slate-200 bg-slate-50">
             <p className="text-sm text-slate-600">
               Un día se considera sospechoso cuando es lectivo, ya ha pasado y
-              ningún catecúmeno tiene asistencia guardada en esa fecha.
+              ningún catecúmeno tiene registrada participación en esa fecha.
+              Tener solo ausencias también cuenta como día sospechoso.
             </p>
           </div>
 
@@ -154,7 +195,9 @@ const Historial: React.FC<HistorialProps> = ({
                 No hay días para mostrar
               </h3>
               <p className="text-sm text-slate-500 mt-2">
-                {showOnlySuspicious
+                {hasNoGroupAssigned
+                  ? "No se muestran días porque no tienes ningún grupo asignado."
+                  : showOnlySuspicious
                   ? "No hay días sospechosos con los criterios actuales."
                   : "Todavía no hay días lectivos pasados en el histórico."}
               </p>

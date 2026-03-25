@@ -3,6 +3,7 @@ export type View =
   | "school-calendar"
   | "attendance"
   | "history"
+  | "group-history"
   | "students"
   | "services"
   | "incidents"
