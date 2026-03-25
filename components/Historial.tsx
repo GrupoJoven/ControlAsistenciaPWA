@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   BookOpen,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   Church,
   Clock,
@@ -273,7 +272,7 @@ const Historial: React.FC<HistorialProps> = ({
           <table className="w-full text-left table-fixed">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-3 lg:px-6 py-4 text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[40%] sm:w-[35%]">
+                <th className="px-3 lg:px-6 py-4 text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[50%] sm:w-[45%]">
                   Alumno
                 </th>
                 <th className="px-1 lg:px-6 py-4 text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
@@ -281,9 +280,6 @@ const Historial: React.FC<HistorialProps> = ({
                 </th>
                 <th className="px-1 lg:px-6 py-4 text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
                   Misa
-                </th>
-                <th className="px-2 lg:px-6 py-4 text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right w-10 sm:w-auto">
-                  Estado
                 </th>
               </tr>
             </thead>
@@ -296,7 +292,6 @@ const Historial: React.FC<HistorialProps> = ({
 
                 const statusCat = record?.catechism || "absent";
                 const statusMass = record?.mass || "absent";
-                const hasAnySavedRecord = Boolean(record);
 
                 return (
                   <tr
@@ -390,19 +385,6 @@ const Historial: React.FC<HistorialProps> = ({
                           </span>
                         </button>
                       </div>
-                    </td>
-
-                    <td className="px-2 lg:px-6 py-4 text-right">
-                      {hasAnySavedRecord ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-                          <CheckCircle2 size={12} />
-                          Guardado
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
-                          Sin revisar
-                        </span>
-                      )}
                     </td>
                   </tr>
                 );
