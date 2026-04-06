@@ -597,7 +597,17 @@ const StudentList: React.FC<StudentListProps> = ({
                 <div className="flex-1">
                   {isEditing ? (
                     <div className="space-y-2">
-                      <input type="text" className="w-full px-3 py-2 border rounded-xl text-lg font-bold" value={tempName} onChange={e => setTempName(e.target.value)} />
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border rounded-xl text-lg font-bold"
+                        value={tempName}
+                        onChange={e => setTempName(e.target.value)}
+                      />
+
+                      <p className="text-sm text-slate-500">
+                        ID público: <span className="font-semibold text-slate-700">{selectedStudent.publicId || "No asignado"}</span>
+                      </p>
+
                       <select
                         className="w-full px-3 py-2 border rounded-xl"
                         value={tempSchool ?? ""}
@@ -630,12 +640,14 @@ const StudentList: React.FC<StudentListProps> = ({
                   ) : (
                     <>
                       <h2 className="text-2xl font-bold text-slate-900">{selectedStudent.name}</h2>
+                      <p className="text-sm text-slate-500">
+                        ID público: <span className="font-semibold text-slate-700">{selectedStudent.publicId || "No asignado"}</span>
+                      </p>
                       <p className="text-slate-500">{selectedStudent.school || "SIN COLEGIO REGISTRADO"}</p>
                       <p className="text-slate-500 text-sm">{selectedStudent.email}</p>
                       {selectedStudent.parentEmail && (
                         <p className="text-slate-500 text-sm">Padres: {selectedStudent.parentEmail}</p>
                       )}
-
                     </>
                   )}
                 </div>

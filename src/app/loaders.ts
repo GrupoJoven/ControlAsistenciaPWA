@@ -180,23 +180,39 @@ export const loadStudents = async (): Promise<Student[]> => {
   try {
     const { data: studentsData, error: studentsErr } = await supabase
       .from("students")
-      .select("id, name, email, parent_email, school, birth_date, group_id, photo_path");
+      .select(`
+        id,
+        name,
+        email,
+        parent_email,
+        school,
+        birth_date,
+        group_id,
+        photo_path,
+        student_public_access(public_id)
+      `);
 
     if (studentsErr) throw studentsErr;
 
-    // Usar Promise.all() para manejar las fotos de forma concurrente
     studentsMapped = await Promise.all(
-      (studentsData ?? []).map(async (student: any) => ({
-        id: student.id,
-        name: student.name,
-        email: student.email ?? "",
-        parentEmail: student.parent_email ?? "",
-        school: student.school ?? null,
-        birthDate: student.birth_date ? String(student.birth_date).slice(0, 10) : "",
-        groupId: student.group_id ?? "",
-        photo: await signMediaUrl(student.photo_path), // Ahora en un `await` dentro de `Promise.all()`
-        attendanceHistory: [], // Lo dejamos vacío aquí, lo llenaremos después
-      }))
+      (studentsData ?? []).map(async (student: any) => {
+        const publicAccess = Array.isArray(student.student_public_access)
+          ? student.student_public_access[0]
+          : student.student_public_access;
+
+        return {
+          id: student.id,
+          name: student.name,
+          email: student.email ?? "",
+          parentEmail: student.parent_email ?? "",
+          school: student.school ?? null,
+          birthDate: student.birth_date ? String(student.birth_date).slice(0, 10) : "",
+          groupId: student.group_id ?? "",
+          publicId: publicAccess?.public_id ?? "",
+          photo: await signMediaUrl(student.photo_path),
+          attendanceHistory: [],
+        };
+      })
     );
 
     await saveOfflineData("students", studentsMapped);

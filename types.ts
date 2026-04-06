@@ -39,6 +39,7 @@ export interface ParishEvent {
 
 export interface Student {
   id: string;
+  publicId: string,
   name: string;
   email: string;
   parentEmail: string;
