@@ -41,6 +41,8 @@ export interface Student {
   id: string;
   publicId: string,
   name: string;
+  gender: string,
+  dni: string,
   email: string;
   parentEmail: string;
   school: string;

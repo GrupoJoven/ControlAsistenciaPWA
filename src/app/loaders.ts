@@ -183,6 +183,8 @@ export const loadStudents = async (): Promise<Student[]> => {
       .select(`
         id,
         name,
+        gender,
+        dni,
         email,
         parent_email,
         school,
@@ -203,6 +205,8 @@ export const loadStudents = async (): Promise<Student[]> => {
         return {
           id: student.id,
           name: student.name,
+          gender: student.gender,
+          dni: student.dni ?? "",
           email: student.email ?? "",
           parentEmail: student.parent_email ?? "",
           school: student.school ?? null,

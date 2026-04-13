@@ -787,20 +787,19 @@ const App: React.FC = () => {
       (updatedStudent.school ?? "").trim() || null;
     const payload = {
       name: updatedStudent.name,
+      gender: updatedStudent.gender || null,
       email: updatedStudent.email || null,
       parent_email: updatedStudent.parentEmail || null,
       school: schoolNormalized,
       birth_date: updatedStudent.birthDate || null,
       group_id: updatedStudent.groupId || null,
-      // ojo: photo si lo guardas en tabla; si NO tienes columna, no lo envíes
-      // photo: updatedStudent.photo || null,
     };
 
     const { data: sData, error: sErr } = await supabase
       .from("students")
       .update(payload)
       .eq("id", updatedStudent.id)
-      .select("id, name, email, parent_email, school, birth_date, group_id")
+      .select("id, name, gender, dni, email, parent_email, school, birth_date, group_id")
       .single();
 
     if (sErr) {
@@ -835,6 +834,8 @@ const App: React.FC = () => {
           ? {
               ...s,
               name: sData.name,
+              gender: sData.gender ?? "",
+              dni: sData.dni ?? s.dni ?? "",
               email: sData.email ?? "",
               parentEmail: sData.parent_email ?? "",
               school: sData.school ?? "",
@@ -855,6 +856,8 @@ const App: React.FC = () => {
       (newStudent.school ?? "").trim() || null;
     const payload = {
       name: newStudent.name,
+      dni: newStudent.dni || null,
+      gender: newStudent.gender || null,
       email: newStudent.email || null,
       parent_email: newStudent.parentEmail || null,
       school: schoolNormalized,
@@ -865,7 +868,7 @@ const App: React.FC = () => {
     const { data, error } = await supabase
       .from("students")
       .insert(payload)
-      .select("id, name, email, parent_email, school, birth_date, group_id")
+      .select("id, name, gender, dni, email, parent_email, school, birth_date, group_id")
       .single();
 
     if (error) {
@@ -875,14 +878,17 @@ const App: React.FC = () => {
 
     const created: Student = {
       id: data.id,
+      publicId: "",
       name: data.name,
+      gender: data.gender ?? "",
+      dni: data.dni ?? "",
       email: data.email ?? "",
       parentEmail: data.parent_email ?? "",
       school: data.school ?? "",
       photo: undefined,
       birthDate: data.birth_date ? String(data.birth_date) : "",
       groupId: data.group_id ?? "",
-      attendanceHistory: [], // historial vive en student_attendance
+      attendanceHistory: [],
     };
 
     setStudents(prev => [...prev, created]);

@@ -59,6 +59,7 @@ const StudentList: React.FC<StudentListProps> = ({
   const [tempEmail, setTempEmail] = useState('');
   const [tempParentEmail, setTempParentEmail] = useState('');
   const [tempBirthDate, setTempBirthDate] = useState('');
+  const [tempGender, setTempGender] = useState('');
   const [tempPhoto, setTempPhoto] = useState<string | undefined>(undefined);
   const [tempHistory, setTempHistory] = useState<AttendanceRecord[]>([]);
 
@@ -68,6 +69,8 @@ const StudentList: React.FC<StudentListProps> = ({
   const [newName, setNewName] = useState('');
   const [newSchool, setNewSchool] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newDni, setNewDni] = useState('');
+  const [newGender, setNewGender] = useState('');
   const [newParentEmail, setNewParentEmail] = useState('');
 
   const [newBirthDate, setNewBirthDate] = useState('2015-01-01');
@@ -144,6 +147,7 @@ const StudentList: React.FC<StudentListProps> = ({
     setTempEmail(student.email ?? '');
     setTempParentEmail(student.parentEmail ?? '');
     setTempBirthDate(student.birthDate);
+    setTempGender(student.gender ?? '');
     setTempPhoto(student.photo);
     setTempHistory(getFullHistory(student));
     setIsEditing(false);
@@ -373,10 +377,15 @@ const StudentList: React.FC<StudentListProps> = ({
       alert("El email del niño es obligatorio.");
       return;
     }
+    if (!tempGender.trim()) {
+      alert("Debes seleccionar el género.");
+      return;
+    }
 
     const updated: Student = {
       ...selectedStudent,
       name: tempName,
+      gender: tempGender.trim(),
       school: tempSchool.trim() ? tempSchool.trim() : null,
       birthDate: tempBirthDate,
       photo: tempPhoto,
@@ -402,13 +411,27 @@ const StudentList: React.FC<StudentListProps> = ({
       alert("No hay conexión. No se puede crear el alumno hasta que vuelva internet.");
       return;
     }
-    if (!onAddStudent || !newName) return;
 
-    // Si son NOT NULL, no puedes permitir vacío
+    if (!onAddStudent || !newName.trim()) {
+      alert("Debes introducir el nombre completo.");
+      return;
+    }
+
+    if (!newDni.trim()) {
+      alert("Debes introducir el DNI.");
+      return;
+    }
+
+    if (!newGender.trim()) {
+      alert("Debes seleccionar el género.");
+      return;
+    }
+
     if (!newEmail.trim()) {
       alert("Debes introducir el email del niño.");
       return;
     }
+
     if (!newParentEmail.trim()) {
       alert("Debes introducir el email de los padres.");
       return;
@@ -416,13 +439,16 @@ const StudentList: React.FC<StudentListProps> = ({
 
     const s: Student = {
       id: "",
-      name: newName,
+      publicId: "",
+      name: newName.trim(),
+      dni: newDni.trim(),
+      gender: newGender.trim(),
       school: newSchool.trim() ? newSchool.trim() : null,
       email: newEmail.trim(),
       parentEmail: newParentEmail.trim(),
       birthDate: newBirthDate,
       groupId: newGroup,
-      attendanceHistory: []
+      attendanceHistory: [],
     };
 
     onAddStudent(s);
@@ -431,6 +457,8 @@ const StudentList: React.FC<StudentListProps> = ({
     setNewSchool('');
     setNewEmail('');
     setNewParentEmail('');
+    setNewDni('');
+    setNewGender('');
   };
 
   return (
@@ -508,7 +536,32 @@ const StudentList: React.FC<StudentListProps> = ({
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-8 space-y-6">
             <h3 className="text-xl font-bold text-slate-900">Nuevo Catecúmeno</h3>
             <div className="space-y-4">
-              <input type="text" placeholder="Nombre completo" className="w-full px-4 py-2 border rounded-xl" value={newName} onChange={e => setNewName(e.target.value)} />
+              <input
+                type="text"
+                placeholder="Nombre completo"
+                className="w-full px-4 py-2 border rounded-xl"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+              />
+
+              <input
+                type="text"
+                placeholder="DNI"
+                className="w-full px-4 py-2 border rounded-xl"
+                value={newDni}
+                onChange={e => setNewDni(e.target.value)}
+              />
+
+              <select
+                className="w-full px-4 py-2 border rounded-xl"
+                value={newGender}
+                onChange={e => setNewGender(e.target.value)}
+              >
+                <option value="">Selecciona género</option>
+                <option value="male">Masculino</option>
+                <option value="female">Femenino</option>
+              </select>
+
               <select
                 className="w-full px-4 py-2 border rounded-xl"
                 value={newSchool ?? ""}
@@ -521,7 +574,14 @@ const StudentList: React.FC<StudentListProps> = ({
                   </option>
                 ))}
               </select>
-              <input type="date" className="w-full px-4 py-2 border rounded-xl" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} />
+
+              <input
+                type="date"
+                className="w-full px-4 py-2 border rounded-xl"
+                value={newBirthDate}
+                onChange={e => setNewBirthDate(e.target.value)}
+              />
+
               <input
                 type="email"
                 placeholder="Email del niño (si tiene)"
@@ -538,7 +598,17 @@ const StudentList: React.FC<StudentListProps> = ({
                 onChange={e => setNewParentEmail(e.target.value)}
               />
 
-              <select className="w-full px-4 py-2 border rounded-xl" value={newGroup} onChange={e => setNewGroup(e.target.value)}>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
+              <select
+                className="w-full px-4 py-2 border rounded-xl"
+                value={newGroup}
+                onChange={e => setNewGroup(e.target.value)}
+              >
+                {groups.map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex gap-4"><button onClick={() => setIsAddingNew(false)} className="flex-1 py-2 text-slate-500 font-bold">Cancelar</button><button onClick={handleAddNew} className="flex-1 py-2 bg-indigo-600 text-white font-bold rounded-xl">Inscribir</button></div>
           </div>
@@ -608,6 +678,20 @@ const StudentList: React.FC<StudentListProps> = ({
                         ID público: <span className="font-semibold text-slate-700">{selectedStudent.publicId || "No asignado"}</span>
                       </p>
 
+                      <p className="text-sm text-slate-500">
+                        DNI: <span className="font-semibold text-slate-700">{selectedStudent.dni || "No consta"}</span>
+                      </p>
+
+                      <select
+                        className="w-full px-3 py-2 border rounded-xl"
+                        value={tempGender}
+                        onChange={e => setTempGender(e.target.value)}
+                      >
+                        <option value="">Selecciona género</option>
+                        <option value="male">Masculino</option>
+                        <option value="female">Femenino</option>
+                      </select>
+
                       <select
                         className="w-full px-3 py-2 border rounded-xl"
                         value={tempSchool ?? ""}
@@ -640,9 +724,26 @@ const StudentList: React.FC<StudentListProps> = ({
                   ) : (
                     <>
                       <h2 className="text-2xl font-bold text-slate-900">{selectedStudent.name}</h2>
+
                       <p className="text-sm text-slate-500">
                         ID público: <span className="font-semibold text-slate-700">{selectedStudent.publicId || "No asignado"}</span>
                       </p>
+
+                      <p className="text-sm text-slate-500">
+                        DNI: <span className="font-semibold text-slate-700">{selectedStudent.dni || "No consta"}</span>
+                      </p>
+
+                      <p className="text-sm text-slate-500">
+                        Género:{" "}
+                        <span className="font-semibold text-slate-700">
+                          {selectedStudent.gender === "male"
+                            ? "Masculino"
+                            : selectedStudent.gender === "female"
+                            ? "Femenino"
+                            : "No consta"}
+                        </span>
+                      </p>
+
                       <p className="text-slate-500">{selectedStudent.school || "SIN COLEGIO REGISTRADO"}</p>
                       <p className="text-slate-500 text-sm">{selectedStudent.email}</p>
                       {selectedStudent.parentEmail && (
