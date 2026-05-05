@@ -18,7 +18,11 @@ interface GroupManagerProps {
   users: User[];
   onUpdateGroup: (g: Group) => void;
   onUpdateStudent: (s: Student) => void;
-  onAssignCatechist: (catechistId: string, groupId: string | null) => void;
+  onAssignCatechist: (
+    catechistId: string,
+    groupId: string | null,
+    assign: boolean
+  ) => void;
 }
 
 const GroupManager: React.FC<GroupManagerProps> = ({ 
@@ -30,6 +34,8 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   onAssignCatechist 
 }) => {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [movingStudent, setMovingStudent] = useState<Student | null>(null);
+  const [targetGroupId, setTargetGroupId] = useState('');
 
   const selectedGroup = useMemo(
     () => groups.find(g => g.id === selectedGroupId) ?? null,
@@ -52,6 +58,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     if (!selectedGroupId) {
       setIsEditingName(false);
       setIsEditingCatechists(false);
+      cancelMoveStudent();
     }
   }, [selectedGroupId]);
 
@@ -69,6 +76,33 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     if (!selectedGroup) return;
     const isAssigned = selectedGroup.catechistIds.includes(userId);
     onAssignCatechist(userId, selectedGroup.id, !isAssigned);
+  };
+
+  const startMoveStudent = (student: Student) => {
+    const firstAvailableGroup = groups.find(g => g.id !== student.groupId);
+
+    setMovingStudent(student);
+    setTargetGroupId(firstAvailableGroup?.id ?? '');
+  };
+
+  const cancelMoveStudent = () => {
+    setMovingStudent(null);
+    setTargetGroupId('');
+  };
+
+  const confirmMoveStudent = async () => {
+    if (!movingStudent || !targetGroupId) return;
+
+    try {
+      await onUpdateStudent({
+        ...movingStudent,
+        groupId: targetGroupId,
+      });
+
+      cancelMoveStudent();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
@@ -238,6 +272,63 @@ const GroupManager: React.FC<GroupManagerProps> = ({
               </div>
             </div>
           </div>
+          {movingStudent && (
+            <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 space-y-5">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Cambiar de grupo
+                  </h3>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Selecciona el nuevo grupo para {movingStudent.name}.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
+                    Nuevo grupo
+                  </label>
+
+                  <select
+                    value={targetGroupId}
+                    onChange={e => setTargetGroupId(e.target.value)}
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-white text-slate-800"
+                  >
+                    {groups
+                      .filter(group => group.id !== movingStudent.groupId)
+                      .map(group => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
+                        </option>
+                      ))}
+                  </select>
+
+                  {groups.filter(group => group.id !== movingStudent.groupId).length === 0 && (
+                    <p className="text-sm text-red-500 mt-2">
+                      No hay otros grupos disponibles.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={cancelMoveStudent}
+                    className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-bold"
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    onClick={confirmMoveStudent}
+                    disabled={!targetGroupId}
+                    className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
