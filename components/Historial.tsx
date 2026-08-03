@@ -9,7 +9,7 @@ import {
   Filter,
 } from "lucide-react";
 import { AttendanceStatus, Group, Student, getTodayStr } from "../types";
-import { AcademicYear } from "../src/utils/academicYear";
+import { AcademicYear, getAcademicYearState } from "../src/utils/academicYear";
 import AttendanceDownloadButton from "./AttendanceDownloadButton";
 
 interface HistorialProps {
@@ -229,6 +229,8 @@ const Historial: React.FC<HistorialProps> = ({
                   ? "No se muestran días porque no tienes ningún grupo asignado."
                   : showOnlySuspicious
                   ? "No hay días sospechosos con los criterios actuales."
+                  : getAcademicYearState(academicYear) === "future"
+                  ? `El ${academicYear.label} todavía no ha comenzado.`
                   : "Todavía no hay días lectivos pasados en el histórico."}
               </p>
             </div>

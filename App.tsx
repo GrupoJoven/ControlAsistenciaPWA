@@ -74,7 +74,7 @@ import {
 import {
   filterDatesByAcademicYear,
   findAcademicYearByKey,
-  getCurrentAcademicYear,
+  getAcademicYearState,
   getDefaultAcademicYear,
   listAcademicYears,
 } from "./src/utils/academicYear";
@@ -557,9 +557,12 @@ const App: React.FC = () => {
     [students]
   );
 
+  // Solo cuentan días lectivos y asistencia. Los eventos de la agenda quedan
+  // fuera a propósito: una entrada con fecha lejana haría aparecer un curso
+  // entero en el selector sin que exista un solo registro de asistencia.
   const availableAcademicYears = useMemo(
-    () => listAcademicYears(classDays, attendanceDates, events.map((e) => e.date)),
-    [classDays, attendanceDates, events]
+    () => listAcademicYears(classDays, attendanceDates),
+    [classDays, attendanceDates]
   );
 
   const selectedAcademicYear = useMemo(
@@ -569,12 +572,14 @@ const App: React.FC = () => {
     [availableAcademicYears, selectedAcademicYearKey]
   );
 
-  const isCurrentAcademicYear =
-    selectedAcademicYear.key === getCurrentAcademicYear().key;
+  const academicYearState = getAcademicYearState(selectedAcademicYear);
+  const isCurrentAcademicYear = academicYearState === 'current';
 
-  // Los cursos ya cerrados solo los puede corregir el coordinator.
+  // Un curso cerrado solo lo corrige el coordinator. En uno que todavía no ha
+  // empezado no hay nada que editar, así que no se habilita para nadie.
   const canEditSelectedYear =
-    isCurrentAcademicYear || currentUser?.role === 'coordinator';
+    academicYearState === 'current' ||
+    (academicYearState === 'past' && currentUser?.role === 'coordinator');
 
   const academicYearClassDays = useMemo(
     () => filterDatesByAcademicYear(classDays, selectedAcademicYear),
@@ -1523,9 +1528,11 @@ const App: React.FC = () => {
                   Estás viendo el {selectedAcademicYear.label}
                 </p>
                 <p>
-                  {canEditSelectedYear
-                    ? "Es un curso ya cerrado. Como coordinador puedes corregir su asistencia, pero hazlo con cuidado."
-                    : "Es un curso ya cerrado, por lo que solo se puede consultar. Vuelve al curso actual para pasar lista o editar."}
+                  {academicYearState === 'future'
+                    ? 'Es un curso que todavía no ha comenzado, así que aún no hay asistencia que mostrar. Empezará el 1 de septiembre.'
+                    : canEditSelectedYear
+                    ? 'Es un curso ya cerrado. Como coordinador puedes corregir su asistencia, pero hazlo con cuidado.'
+                    : 'Es un curso ya cerrado, por lo que solo se puede consultar. Vuelve al curso actual para pasar lista o editar.'}
                 </p>
               </div>
             </div>

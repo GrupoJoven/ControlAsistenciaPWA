@@ -58,6 +58,20 @@ export const getCurrentAcademicYear = (): AcademicYear =>
 export const isInAcademicYear = (dateStr: string, year: AcademicYear): boolean =>
   dateStr >= year.start && dateStr <= year.end;
 
+export type AcademicYearState = "past" | "current" | "future";
+
+/**
+ * Situación del curso respecto a hoy. Hace falta distinguir los tres casos:
+ * un curso futuro no es un curso cerrado, aunque ninguno de los dos sea el actual.
+ */
+export const getAcademicYearState = (year: AcademicYear): AcademicYearState => {
+  const today = todayStr();
+
+  if (today > year.end) return "past";
+  if (today < year.start) return "future";
+  return "current";
+};
+
 export const filterDatesByAcademicYear = (
   dates: string[],
   year: AcademicYear

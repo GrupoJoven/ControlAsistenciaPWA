@@ -20,7 +20,7 @@ import {
   Mail
 } from 'lucide-react';
 import { Student, AttendanceRecord, calculateAttendanceWeight, Group, calculateStudentRate, getTodayStr, AttendanceStatus } from '../types';
-import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import { AcademicYear, getAcademicYearCutoff, getAcademicYearState } from '../src/utils/academicYear';
 import AttendanceDownloadButton from './AttendanceDownloadButton';
 
 interface StudentListProps {
@@ -848,7 +848,9 @@ const StudentList: React.FC<StudentListProps> = ({
                     <h4 className="text-lg font-bold">Asistencia {academicYear.label}</h4>
                     {!canEditAttendance && (
                       <p className="text-xs text-amber-700 mt-0.5">
-                        Curso cerrado: la asistencia es solo de consulta.
+                        {getAcademicYearState(academicYear) === 'future'
+                          ? 'Este curso todavía no ha comenzado.'
+                          : 'Curso cerrado: la asistencia es solo de consulta.'}
                       </p>
                     )}
                   </div>
