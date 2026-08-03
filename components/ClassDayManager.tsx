@@ -1,14 +1,16 @@
 
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle2, CalendarDays, AlertTriangle, X, Check } from 'lucide-react';
-import { formatDateLocal, getTodayStr, getAcademicYearRange } from '../types';
+import { formatDateLocal, getTodayStr } from '../types';
+import { AcademicYear } from '../src/utils/academicYear';
 
 interface ClassDayManagerProps {
   classDays: string[];
+  academicYear: AcademicYear;
   onToggle: (date: string) => void;
 }
 
-const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, onToggle }) => {
+const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYear, onToggle }) => {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -50,11 +52,12 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, onToggle }
   const calendarDays = getDaysInMonth(currentMonth);
   const todayStr = getTodayStr();
   
-  // Calculate count for current academic year
+  // Días lectivos del curso académico seleccionado
   const currentAcademicYearDaysCount = useMemo(() => {
-    const range = getAcademicYearRange(todayStr);
-    return classDays.filter(day => day >= range.start && day <= range.end).length;
-  }, [classDays, todayStr]);
+    return classDays.filter(
+      day => day >= academicYear.start && day <= academicYear.end
+    ).length;
+  }, [classDays, academicYear]);
 
   const handleDayClick = (dateStr: string) => {
     const isSelected = classDays.includes(dateStr);
@@ -152,7 +155,7 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, onToggle }
             Resumen del Curso Pastoral
           </h4>
           <p className="text-xs sm:text-sm text-indigo-700 leading-relaxed">
-            Has marcado un total de <strong>{currentAcademicYearDaysCount} días lectivos</strong> para el curso actual.
+            Has marcado un total de <strong>{currentAcademicYearDaysCount} días lectivos</strong> para el {academicYear.label}.
           </p>
         </div>
       </div>

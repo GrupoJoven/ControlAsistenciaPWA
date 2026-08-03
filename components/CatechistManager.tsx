@@ -21,7 +21,8 @@ import {
   Church,
   Key
 } from 'lucide-react';
-import { User, Group, CatechistAttendanceRecord, AttendanceStatus, getTodayStr, getAcademicYearRange, ParishEvent, calculateCatechistRate } from '../types';
+import { User, Group, CatechistAttendanceRecord, AttendanceStatus, ParishEvent, calculateCatechistRate } from '../types';
+import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
 
 interface CatechistManagerProps {
   users: User[];
@@ -29,6 +30,7 @@ interface CatechistManagerProps {
   groups: Group[];
   classDays: string[];
   events: ParishEvent[];
+  academicYear: AcademicYear;
   onResetPassword: (userId: string, newPassword: string) => Promise<void>;
 
   // Alta: permite 0..N grupos
@@ -54,6 +56,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
   groups,
   classDays,
   events,
+  academicYear,
   onResetPassword,
   onAddUser,
   onUpdateUser,
@@ -84,20 +87,18 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
   };
 
   const loadFullHistoryFromDB = async (userId: string) => {
-    const today = getTodayStr();
-    const range = getAcademicYearRange(today);
-    const end = today < range.end ? today : range.end;
+    const end = getAcademicYearCutoff(academicYear);
 
     // Días lectivos y eventos relevantes (solo pasado)
-    const relevantClassDays = classDays.filter(d => d >= range.start && d <= end);
-    const relevantEvents = events.filter(e => e.date >= range.start && e.date <= end);
+    const relevantClassDays = classDays.filter(d => d >= academicYear.start && d <= end);
+    const relevantEvents = events.filter(e => e.date >= academicYear.start && e.date <= end);
 
     // 1) Clases (catechist_attendance)
     const { data: classRows, error: classErr } = await supabase
       .from("catechist_attendance")
       .select("date, catechism, mass")
       .eq("profile_id", userId)
-      .gte("date", range.start)
+      .gte("date", academicYear.start)
       .lte("date", end);
 
     if (classErr) throw classErr;
@@ -115,7 +116,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
       .from("catechist_attendance_events")
       .select("event_id, date, status")
       .eq("profile_id", userId)
-      .gte("date", range.start)
+      .gte("date", academicYear.start)
       .lte("date", end);
 
     if (eventErr) throw eventErr;
@@ -523,7 +524,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
             .filter(Boolean) as string[];
 
           const catGroupLabel = names.length ? names.join(", ") : "Sin grupo";
-          const rate = calculateCatechistRate(cat, classDays, events);
+          const rate = calculateCatechistRate(cat, classDays, events, academicYear);
           
           return (
             <div 

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { supabase } from "../src/lib/supabaseClient";
 import { 
   Plus, 
@@ -19,7 +19,9 @@ import {
   Clock,
   Mail
 } from 'lucide-react';
-import { Student, AttendanceRecord, calculateAttendanceWeight, Group, calculateStudentRate, getTodayStr, getAcademicYearRange, AttendanceStatus } from '../types';
+import { Student, AttendanceRecord, calculateAttendanceWeight, Group, calculateStudentRate, getTodayStr, AttendanceStatus } from '../types';
+import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import AttendanceDownloadButton from './AttendanceDownloadButton';
 
 interface StudentListProps {
   students: Student[];
@@ -29,6 +31,12 @@ interface StudentListProps {
   onRemoveStudent?: (id: string) => Promise<void>;
   groups?: Group[];
   classDays: string[];
+  academicYear: AcademicYear;
+  availableAcademicYears: AcademicYear[];
+  /** false en cursos ya cerrados cuando el usuario no es coordinator. */
+  canEditAttendance: boolean;
+  /** Etiqueta del conjunto mostrado, usada al descargar el histórico completo. */
+  downloadScopeLabel: string;
   warningMessage?: string;
   warningType?: "no-group" | "no-students";
   enableMassServices?: boolean;
@@ -36,14 +44,18 @@ interface StudentListProps {
   isOnline: boolean;
 }
 
-const StudentList: React.FC<StudentListProps> = ({ 
-  students, 
-  onUpdateStudent, 
-  canEditCenso, 
-  onAddStudent, 
+const StudentList: React.FC<StudentListProps> = ({
+  students,
+  onUpdateStudent,
+  canEditCenso,
+  onAddStudent,
   onRemoveStudent,
   groups = [],
   classDays,
+  academicYear,
+  availableAcademicYears,
+  canEditAttendance,
+  downloadScopeLabel,
   warningMessage,
   warningType,
   enableMassServices = false,
@@ -100,9 +112,8 @@ const StudentList: React.FC<StudentListProps> = ({
   }, [students, filterGroupId]);
 
   const getFullHistory = (student: Student) => {
-    const today = getTodayStr();
-    const range = getAcademicYearRange(today);
-    const relevantClassDays = classDays.filter(day => day >= range.start && day <= range.end && day <= today);
+    const cutoff = getAcademicYearCutoff(academicYear);
+    const relevantClassDays = classDays.filter(day => day >= academicYear.start && day <= cutoff);
 
     const fullHistory = relevantClassDays.map(day => {
       const existing = student.attendanceHistory.find(h => h.date === day);
@@ -139,6 +150,15 @@ const StudentList: React.FC<StudentListProps> = ({
       setServicesLoading(false);
     }
   };
+
+  // Al cambiar de curso académico con la ficha abierta, se recarga el detalle
+  // para que no siga mostrando los días del curso anterior.
+  useEffect(() => {
+    if (!selectedStudent) return;
+
+    setTempHistory(getFullHistory(selectedStudent));
+    setIsEditing(false);
+  }, [academicYear.key]);
 
   const handleOpenDetail = (student: Student) => {
     setSelectedStudent(student);
@@ -382,6 +402,12 @@ const StudentList: React.FC<StudentListProps> = ({
       return;
     }
 
+    // tempHistory solo contiene el curso que se está viendo. Se conservan los
+    // registros del resto de cursos para no vaciarlos en la vista al guardar.
+    const otherYearsHistory = (selectedStudent.attendanceHistory ?? []).filter(
+      record => record.date < academicYear.start || record.date > academicYear.end
+    );
+
     const updated: Student = {
       ...selectedStudent,
       name: tempName,
@@ -391,7 +417,7 @@ const StudentList: React.FC<StudentListProps> = ({
       photo: tempPhoto,
       email: tempEmail.trim(),
       parentEmail: tempParentEmail.trim(),
-      attendanceHistory: tempHistory,
+      attendanceHistory: [...otherYearsHistory, ...tempHistory],
     };
 
     onUpdateStudent(updated);
@@ -480,6 +506,21 @@ const StudentList: React.FC<StudentListProps> = ({
             </div>
           )}
         </div>
+        <div className="flex items-center gap-2">
+          <AttendanceDownloadButton
+            students={filteredStudents}
+            classDays={classDays}
+            groups={groups}
+            availableYears={availableAcademicYears}
+            selectedYear={academicYear}
+            scopeLabel={
+              filterGroupId === 'all'
+                ? downloadScopeLabel
+                : groups.find(g => g.id === filterGroupId)?.name ?? downloadScopeLabel
+            }
+            variant="subtle"
+          />
+
         {canEditCenso && (
           <button
             disabled={!isOnline}
@@ -493,11 +534,12 @@ const StudentList: React.FC<StudentListProps> = ({
             <UserPlus size={18} /> Nuevo Niño
           </button>
         )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredStudents.map(student => {
-          const rate = calculateStudentRate(student, classDays);
+          const rate = calculateStudentRate(student, classDays, academicYear);
           const groupName = groups.find(g => g.id === student.groupId)?.name || 'SIN GRUPO';
 
           return (
@@ -801,8 +843,28 @@ const StudentList: React.FC<StudentListProps> = ({
                   )}
                 </div>
               )}
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-bold">Asistencia Curso Actual</h4>
+                <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <h4 className="text-lg font-bold">Asistencia {academicYear.label}</h4>
+                    {!canEditAttendance && (
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        Curso cerrado: la asistencia es solo de consulta.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <AttendanceDownloadButton
+                      students={[selectedStudent]}
+                      classDays={classDays}
+                      groups={groups}
+                      availableYears={availableAcademicYears}
+                      selectedYear={academicYear}
+                      scopeLabel={selectedStudent.name}
+                      buttonLabel="Descargar"
+                      variant="subtle"
+                    />
+
                   {isEditing && <button
                     onClick={handleSave}
                     disabled={!isOnline}
@@ -812,6 +874,7 @@ const StudentList: React.FC<StudentListProps> = ({
                         : "text-slate-400 bg-slate-100 cursor-not-allowed"
                     }`}
                   ><Save size={14} />Guardar</button>}
+                  </div>
                 </div>
                 <div className="space-y-3">
                   {tempHistory.map((record, i) => (
@@ -820,9 +883,9 @@ const StudentList: React.FC<StudentListProps> = ({
                       <div className="flex items-center gap-3">
                         <div className="flex flex-col items-center">
                           <span className="text-[9px] font-bold text-slate-400 mb-1">CAT</span>
-                          <button 
-                            disabled={!isEditing} 
-                            onClick={() => { const h = [...tempHistory]; h[i].catechism = cycleStatus(h[i].catechism); setTempHistory(h); }} 
+                          <button
+                            disabled={!isEditing || !canEditAttendance}
+                            onClick={() => { const h = [...tempHistory]; h[i].catechism = cycleStatus(h[i].catechism); setTempHistory(h); }}
                             className={`p-2 rounded-lg ${record.catechism === 'present' ? 'bg-indigo-600 text-white' : record.catechism === 'late' ? 'bg-amber-100 text-amber-700 border border-amber-400' : 'bg-slate-50 text-slate-300'}`}
                           >
                             {record.catechism === 'late' ? <Clock size={16} /> : <BookOpen size={16} />}
@@ -830,9 +893,9 @@ const StudentList: React.FC<StudentListProps> = ({
                         </div>
                         <div className="flex flex-col items-center">
                           <span className="text-[9px] font-bold text-slate-400 mb-1">MISA</span>
-                          <button 
-                            disabled={!isEditing} 
-                            onClick={() => { const h = [...tempHistory]; h[i].mass = cycleStatus(h[i].mass); setTempHistory(h); }} 
+                          <button
+                            disabled={!isEditing || !canEditAttendance}
+                            onClick={() => { const h = [...tempHistory]; h[i].mass = cycleStatus(h[i].mass); setTempHistory(h); }}
                             className={`p-2 rounded-lg ${record.mass === 'present' ? 'bg-amber-500 text-white' : record.mass === 'late' ? 'bg-amber-100 text-amber-700 border border-amber-400' : 'bg-slate-50 text-slate-300'}`}
                           >
                             {record.mass === 'late' ? <Clock size={16} /> : <Church size={16} />}

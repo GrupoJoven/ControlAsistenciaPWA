@@ -8,11 +8,23 @@ import {
   Clock,
   Filter,
 } from "lucide-react";
-import { AttendanceStatus, Student, getTodayStr } from "../types";
+import { AttendanceStatus, Group, Student, getTodayStr } from "../types";
+import { AcademicYear } from "../src/utils/academicYear";
+import AttendanceDownloadButton from "./AttendanceDownloadButton";
 
 interface HistorialProps {
+  /** Días lectivos del curso seleccionado. */
   students: Student[];
   classDays: string[];
+  /** Todos los días lectivos, de cualquier curso, para la descarga completa. */
+  allClassDays: string[];
+  groups: Group[];
+  academicYear: AcademicYear;
+  availableAcademicYears: AcademicYear[];
+  /** false en cursos ya cerrados cuando el usuario no es coordinator. */
+  canEdit: boolean;
+  /** Nombre del grupo, usado en el fichero descargado. */
+  scopeLabel: string;
   onUpdate: (
     date: string,
     studentId: string,
@@ -30,6 +42,12 @@ interface HistorialProps {
 const Historial: React.FC<HistorialProps> = ({
   students,
   classDays,
+  allClassDays,
+  groups,
+  academicYear,
+  availableAcademicYears,
+  canEdit,
+  scopeLabel,
   onUpdate,
   warningMessage,
   warningType,
@@ -160,19 +178,31 @@ const Historial: React.FC<HistorialProps> = ({
               )}
             </div>
             {!hasNoGroupAssigned && (
-              <button
-                onClick={() => setShowOnlySuspicious((prev) => !prev)}
-                className={`font-bold text-[11px] sm:text-xs px-4 py-2 rounded-xl transition-colors border flex items-center gap-2 ${
-                  showOnlySuspicious
-                    ? "bg-white text-indigo-700 border-white"
-                    : "bg-white/15 hover:bg-white/25 border-white/20 text-white"
-                }`}
-              >
-                <Filter size={16} />
-                {showOnlySuspicious
-                  ? "Mostrando sospechosos"
-                  : "Filtrar por días sospechosos"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setShowOnlySuspicious((prev) => !prev)}
+                  className={`font-bold text-[11px] sm:text-xs px-4 py-2 rounded-xl transition-colors border flex items-center gap-2 ${
+                    showOnlySuspicious
+                      ? "bg-white text-indigo-700 border-white"
+                      : "bg-white/15 hover:bg-white/25 border-white/20 text-white"
+                  }`}
+                >
+                  <Filter size={16} />
+                  {showOnlySuspicious
+                    ? "Mostrando sospechosos"
+                    : "Filtrar por días sospechosos"}
+                </button>
+
+                <AttendanceDownloadButton
+                  students={students}
+                  classDays={allClassDays}
+                  groups={groups}
+                  availableYears={availableAcademicYears}
+                  selectedYear={academicYear}
+                  scopeLabel={parentLabel ?? scopeLabel}
+                  variant="onDark"
+                />
+              </div>
             )}
           </div>
         </div>
@@ -278,10 +308,15 @@ const Historial: React.FC<HistorialProps> = ({
         <div className="w-full sm:w-auto flex justify-end">
           {!isEditing ? (
             <button
-              disabled={!isOnline}
+              disabled={!isOnline || !canEdit}
               onClick={() => setIsEditing(true)}
+              title={
+                !canEdit
+                  ? `El ${academicYear.label} está cerrado: solo lo puede corregir un coordinador.`
+                  : undefined
+              }
               className={`font-bold text-[11px] sm:text-xs px-4 py-2 rounded-xl transition-colors border ${
-                isOnline
+                isOnline && canEdit
                   ? "bg-white text-indigo-700 border-white hover:bg-indigo-50"
                   : "bg-white/10 border-white/10 text-white/50 cursor-not-allowed"
               }`}
@@ -305,8 +340,18 @@ const Historial: React.FC<HistorialProps> = ({
 
       {!isEditing && (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 text-sm">
-          Pulsa <span className="font-bold">Editar asistencia</span> para
-          desbloquear la revisión de este día.
+          {canEdit ? (
+            <>
+              Pulsa <span className="font-bold">Editar asistencia</span> para
+              desbloquear la revisión de este día.
+            </>
+          ) : (
+            <>
+              El <span className="font-bold">{academicYear.label}</span> ya está
+              cerrado, así que este día es solo de consulta. Si hay que corregir
+              algo, contacta con el coordinador.
+            </>
+          )}
         </div>
       )}
 

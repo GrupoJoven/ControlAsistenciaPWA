@@ -11,26 +11,28 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Student, calculateAttendanceWeight, ParishEvent, calculateStudentRate, getTodayStr, getAcademicYearRange, AttendanceRecord } from '../types';
+import { Student, calculateAttendanceWeight, ParishEvent, calculateStudentRate, getTodayStr, AttendanceRecord } from '../types';
+import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
 
 interface DashboardProps {
   students: Student[];
   events: ParishEvent[];
   onManageAgenda?: () => void;
   classDays: string[];
+  academicYear: AcademicYear;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda, classDays }) => {
+const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda, classDays, academicYear }) => {
   const today = getTodayStr();
-  const academicYear = getAcademicYearRange(today);
-  
+  const cutoff = getAcademicYearCutoff(academicYear);
+
   const todayRecords = students.map(s => s.attendanceHistory.find(h => h.date === today)).filter(Boolean) as AttendanceRecord[];
-  
+
   const stats = {
     total: students.length,
     attendedCatechism: todayRecords.filter(r => r.catechism === 'present' || r.catechism === 'late').length,
     attendedMass: todayRecords.filter(r => r.mass === 'present' || r.mass === 'late').length,
-    atRisk: students.filter(s => calculateStudentRate(s, classDays) < 60).length,
+    atRisk: students.filter(s => calculateStudentRate(s, classDays, academicYear) < 60).length,
   };
 
   // Filter and sort only future events
@@ -42,25 +44,28 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [events]);
 
-  // Monthly chart data based on current academic year class days
+  // Monthly chart data based on the selected academic year class days
   const chartData = useMemo(() => {
     const nStudents = students.length;
-  
+
+    // Último mes a representar: el actual si el curso está en marcha, o agosto
+    // si ya se cerró.
+    const cutoffMonthIdx = Number(cutoff.slice(5, 7)) - 1;
+
     // Si no hay alumnos, evita divisiones raras
     if (nStudents === 0) {
       const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-      const currentMonthIdx = new Date(today).getMonth();
       return [
         { name: 'Sep', participación: 0 },
-        { name: monthNames[currentMonthIdx], participación: 0 }
+        { name: monthNames[cutoffMonthIdx], participación: 0 }
       ];
     }
-  
+
     // 1) Días lectivos del curso ya pasados
     const pastClassDays = classDays.filter(
-      d => d >= academicYear.start && d <= academicYear.end && d <= today
+      d => d >= academicYear.start && d <= cutoff
     );
-  
+
     const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
   
     // 2) Acumuladores mensuales
@@ -87,10 +92,9 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
       monthTotals[monthKey].nDays += 1; // contamos el día lectivo aunque haya sido 0
     });
   
-    // 4) Construimos secuencia académica Sep->Ago, pero cortamos en mes actual
+    // 4) Construimos secuencia académica Sep->Ago, pero cortamos en el mes tope
     const yearSequence = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7]; // Sep..Ago
-    const currentMonthIdx = new Date(today).getMonth();
-  
+
     const dataForChart: { name: string; participación: number }[] = [];
   
     for (const mIdx of yearSequence) {
@@ -107,14 +111,14 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
         // Si prefieres ocultarlos (como ahora), no haces nada.
       }
   
-      if (mIdx === currentMonthIdx) break;
+      if (mIdx === cutoffMonthIdx) break;
     }
-  
+
     return dataForChart.length > 0 ? dataForChart : [
       { name: 'Sep', participación: 0 },
-      { name: monthNames[currentMonthIdx], participación: 0 }
+      { name: monthNames[cutoffMonthIdx], participación: 0 }
     ];
-  }, [students, classDays, academicYear, today]);
+  }, [students, classDays, academicYear, cutoff]);
 
   return (
     <div className="space-y-6 lg:space-y-8">

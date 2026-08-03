@@ -1,3 +1,4 @@
+import { AcademicYear, getAcademicYearCutoff, getCurrentAcademicYear } from './src/utils/academicYear';
 
 export type UserRole = 'catechist' | 'coordinator';
 
@@ -106,17 +107,21 @@ export const calculateAttendanceWeight = (record: { catechism?: AttendanceStatus
 };
 
 /**
- * Calculates attendance rate considering all class days in the current academic year (Sept-Aug)
- * that have already passed.
+ * Calculates attendance rate considering all class days in the given academic year
+ * (Sept-Aug) that have already passed. Defaults to the current academic year.
  */
-export const calculateStudentRate = (student: Student, classDays: string[]): number => {
-  const today = getTodayStr();
-  const { start, end } = getAcademicYearRange(today);
-  
-  const relevantClassDays = classDays.filter(day => 
-    day >= start && day <= end && day <= today
+export const calculateStudentRate = (
+  student: Student,
+  classDays: string[],
+  academicYear?: AcademicYear
+): number => {
+  const year = academicYear ?? getCurrentAcademicYear();
+  const cutoff = getAcademicYearCutoff(year);
+
+  const relevantClassDays = classDays.filter(day =>
+    day >= year.start && day <= cutoff
   );
-  
+
   if (relevantClassDays.length === 0) return 100;
 
   let totalPointsEarned = 0;
@@ -132,15 +137,21 @@ export const calculateStudentRate = (student: Student, classDays: string[]): num
 };
 
 /**
- * Calculates catechist attendance rate including class days and events.
+ * Calculates catechist attendance rate including class days and events, scoped to
+ * the given academic year. Defaults to the current academic year.
  */
-export const calculateCatechistRate = (catechist: User, classDays: string[], events: ParishEvent[]): number => {
-  const today = getTodayStr();
-  const { start, end } = getAcademicYearRange(today);
-  
-  const pastClassDays = classDays.filter(day => day >= start && day <= end && day <= today);
-  const pastEvents = events.filter(e => e.date >= start && e.date <= end && e.date <= today);
-  
+export const calculateCatechistRate = (
+  catechist: User,
+  classDays: string[],
+  events: ParishEvent[],
+  academicYear?: AcademicYear
+): number => {
+  const year = academicYear ?? getCurrentAcademicYear();
+  const cutoff = getAcademicYearCutoff(year);
+
+  const pastClassDays = classDays.filter(day => day >= year.start && day <= cutoff);
+  const pastEvents = events.filter(e => e.date >= year.start && e.date <= cutoff);
+
   const totalOccurrences = pastClassDays.length + pastEvents.length;
   if (totalOccurrences === 0) return 100;
 

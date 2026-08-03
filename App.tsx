@@ -71,6 +71,14 @@ import {
   StudentBirthdayInfo,
 } from "./src/types/app";
 
+import {
+  filterDatesByAcademicYear,
+  findAcademicYearByKey,
+  getCurrentAcademicYear,
+  getDefaultAcademicYear,
+  listAcademicYears,
+} from "./src/utils/academicYear";
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<View>('dashboard');
@@ -89,6 +97,7 @@ const App: React.FC = () => {
 
   // Para catequistas con varios grupos: cuál está “activo” en la UI
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [selectedAcademicYearKey, setSelectedAcademicYearKey] = useState<string | null>(null);
 
   const [baseDataLoaded, setBaseDataLoaded] = useState(false);
   const [todayBirthdays, setTodayBirthdays] = useState<BirthdayInfo[]>([]);
@@ -539,6 +548,47 @@ const App: React.FC = () => {
   };
 
   const isSearchView = ['students', 'coordinator-groups', 'catechists'].includes(currentView);
+
+  // --- Curso académico -------------------------------------------------------
+  // El curso va del 1 de septiembre al 31 de agosto. Se ofrecen en el selector
+  // los cursos que tengan algún registro, más el actual aunque esté vacío.
+  const attendanceDates = useMemo(
+    () => students.flatMap((student) => (student.attendanceHistory ?? []).map((h) => h.date)),
+    [students]
+  );
+
+  const availableAcademicYears = useMemo(
+    () => listAcademicYears(classDays, attendanceDates, events.map((e) => e.date)),
+    [classDays, attendanceDates, events]
+  );
+
+  const selectedAcademicYear = useMemo(
+    () =>
+      findAcademicYearByKey(availableAcademicYears, selectedAcademicYearKey) ??
+      getDefaultAcademicYear(availableAcademicYears),
+    [availableAcademicYears, selectedAcademicYearKey]
+  );
+
+  const isCurrentAcademicYear =
+    selectedAcademicYear.key === getCurrentAcademicYear().key;
+
+  // Los cursos ya cerrados solo los puede corregir el coordinator.
+  const canEditSelectedYear =
+    isCurrentAcademicYear || currentUser?.role === 'coordinator';
+
+  const academicYearClassDays = useMemo(
+    () => filterDatesByAcademicYear(classDays, selectedAcademicYear),
+    [classDays, selectedAcademicYear]
+  );
+
+  const academicYearEvents = useMemo(
+    () =>
+      events.filter(
+        (event) =>
+          event.date >= selectedAcademicYear.start && event.date <= selectedAcademicYear.end
+      ),
+    [events, selectedAcademicYear]
+  );
   const persistStudentAttendance = async (
     date: string,
     studentId: string,
@@ -1407,6 +1457,10 @@ const App: React.FC = () => {
           isSearchView={isSearchView}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          academicYears={availableAcademicYears}
+          selectedAcademicYear={selectedAcademicYear}
+          onChangeAcademicYear={setSelectedAcademicYearKey}
+          isCurrentAcademicYear={isCurrentAcademicYear}
         />
         {showPushBanner && (
           <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900 shadow-sm">
@@ -1460,6 +1514,24 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {!isCurrentAcademicYear && (
+          <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm">
+            <div className="flex items-start gap-3">
+              <TriangleAlert size={18} className="mt-0.5 shrink-0" />
+              <div className="text-sm">
+                <p className="font-semibold">
+                  Estás viendo el {selectedAcademicYear.label}
+                </p>
+                <p>
+                  {canEditSelectedYear
+                    ? "Es un curso ya cerrado. Como coordinador puedes corregir su asistencia, pero hazlo con cuidado."
+                    : "Es un curso ya cerrado, por lo que solo se puede consultar. Vuelve al curso actual para pasar lista o editar."}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-4 lg:p-8">
           {isSearchView && (
             <div className="sm:hidden mb-6 relative">
@@ -1468,7 +1540,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'dashboard' && <Dashboard students={students} events={events} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} />}
+          {currentView === 'dashboard' && <Dashboard students={students} events={academicYearEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
           {currentView === 'attendance' && (
             <AttendanceTracker
               students={myCatecumenos}
@@ -1483,7 +1555,13 @@ const App: React.FC = () => {
             <Historial
               students={myCatecumenos}
               onUpdate={updateHistoricalStudentAttendance}
-              classDays={classDays}
+              classDays={academicYearClassDays}
+              allClassDays={classDays}
+              groups={groups}
+              academicYear={selectedAcademicYear}
+              availableAcademicYears={availableAcademicYears}
+              canEdit={canEditSelectedYear}
+              scopeLabel={currentGroupName || 'Mi grupo'}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
               isOnline={isOnline}
@@ -1493,7 +1571,11 @@ const App: React.FC = () => {
             <HistoricoGrupos
               groups={groups}
               students={students}
-              classDays={classDays}
+              classDays={academicYearClassDays}
+              allClassDays={classDays}
+              academicYear={selectedAcademicYear}
+              availableAcademicYears={availableAcademicYears}
+              canEdit={canEditSelectedYear}
               onUpdate={updateHistoricalStudentAttendance}
               isOnline={isOnline}
             />
@@ -1526,6 +1608,10 @@ const App: React.FC = () => {
               groups={groups}
               canEditCenso={false}
               classDays={classDays}
+              academicYear={selectedAcademicYear}
+              availableAcademicYears={availableAcademicYears}
+              canEditAttendance={canEditSelectedYear}
+              downloadScopeLabel={currentGroupName || 'Mi grupo'}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
               schoolNames={schoolNames}
@@ -1551,6 +1637,10 @@ const App: React.FC = () => {
               onRemoveStudent={(id) => void removeStudent(id)}
               groups={groups}
               classDays={classDays}
+              academicYear={selectedAcademicYear}
+              availableAcademicYears={availableAcademicYears}
+              canEditAttendance={canEditSelectedYear}
+              downloadScopeLabel="Todos los niños"
               enableMassServices={true}
               schoolNames={schoolNames}
               isOnline={isOnline}
@@ -1569,12 +1659,13 @@ const App: React.FC = () => {
               groups={groups}
               classDays={classDays}
               events={events}
+              academicYear={selectedAcademicYear}
               onResetPassword={(uid, pw) => resetPassword(uid, pw)}
               isOnline={isOnline}
             />
           )}
 
-          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={users.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={events} classDays={classDays} onUpdate={updateCatechistAttendance} />}
+          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={users.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={academicYearEvents} classDays={academicYearClassDays} onUpdate={updateCatechistAttendance} />}
           {currentView === 'coordinator-edit-groups' && (
             <GroupManager
               groups={groupsWithCatechists}
@@ -1589,6 +1680,7 @@ const App: React.FC = () => {
           {currentView === 'class-days' && currentUser.role === 'coordinator' && (
             <ClassDayManager
               classDays={classDays}
+              academicYear={selectedAcademicYear}
               onToggle={(d) => void toggleClassDay(d)}
             />
           )}
@@ -1607,6 +1699,7 @@ const App: React.FC = () => {
               classDays={classDays}
               users={users}
               events={events}
+              academicYear={selectedAcademicYear}
               activeGroupId={activeGroupId}
               myGroups={myGroups}
               isOnline={isOnline}

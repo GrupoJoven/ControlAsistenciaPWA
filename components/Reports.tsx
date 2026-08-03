@@ -19,9 +19,9 @@ import {
   calculateCatechistRate,
   ParishEvent,
   getTodayStr,
-  getAcademicYearRange,
   AttendanceStatus,
 } from "../types";
+import { AcademicYear, getAcademicYearCutoff } from "../src/utils/academicYear";
 
 interface ReportsProps {
   students: Student[];
@@ -30,6 +30,7 @@ interface ReportsProps {
   classDays: string[];
   users: User[];
   events: ParishEvent[];
+  academicYear: AcademicYear;
   activeGroupId: string | null; // viene desde App.tsx
   myGroups: Group[]; // viene desde App.tsx (solo grupos del usuario)
   isOnline: boolean;
@@ -60,6 +61,7 @@ const Reports: React.FC<ReportsProps> = ({
   classDays,
   users,
   events,
+  academicYear,
   activeGroupId,
   myGroups,
   isOnline,
@@ -104,20 +106,21 @@ const Reports: React.FC<ReportsProps> = ({
     }
   }, [reportType, currentUser.role]);
 
-  const { start, end } = getAcademicYearRange(today);
+  const start = academicYear.start;
+  const end = getAcademicYearCutoff(academicYear);
 
   // Fechas pasadas del curso (para CSV)
   const pastClassDays = useMemo(
-    () => classDays.filter((d) => d >= start && d <= end && d <= today).sort(),
-    [classDays, start, end, today]
+    () => classDays.filter((d) => d >= start && d <= end).sort(),
+    [classDays, start, end]
   );
 
   const pastEvents = useMemo(
     () =>
       events
-        .filter((e) => e.date >= start && e.date <= end && e.date <= today)
+        .filter((e) => e.date >= start && e.date <= end)
         .sort((a, b) => a.date.localeCompare(b.date)),
-    [events, start, end, today]
+    [events, start, end]
   );
 
   // --- Helpers CSV ---
@@ -240,7 +243,7 @@ const Reports: React.FC<ReportsProps> = ({
 
       rows = filteredStudents
         .map((s) => {
-          const rate = calculateStudentRate(s, classDays);
+          const rate = calculateStudentRate(s, classDays, academicYear);
           const groupName = groups.find((g) => g.id === s.groupId)?.name || "Sin Grupo";
 
           const dateValues = pastClassDays
@@ -269,7 +272,7 @@ const Reports: React.FC<ReportsProps> = ({
 
       rows = filteredCatechists
         .map((c) => {
-          const rate = calculateCatechistRate(c, classDays, events);
+          const rate = calculateCatechistRate(c, classDays, events, academicYear);
 
           // En tu modelo actual, un catequista puede estar en varios grupos.
           // Para CSV mostramos "Varios" si no hay forma directa de inferir un único grupo.

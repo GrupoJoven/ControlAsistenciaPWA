@@ -3,6 +3,7 @@ import { Menu, Search } from "lucide-react";
 import { VIEW_TITLES } from "../../src/app/viewTitles";
 import { Group } from "../../types";
 import { View } from "../../src/types/app";
+import { AcademicYear } from "../../src/utils/academicYear";
 
 interface AppHeaderProps {
   currentView: View;
@@ -14,6 +15,10 @@ interface AppHeaderProps {
   isSearchView: boolean;
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  academicYears: AcademicYear[];
+  selectedAcademicYear: AcademicYear;
+  onChangeAcademicYear: (key: string) => void;
+  isCurrentAcademicYear: boolean;
 }
 
 const AppHeader: React.FC<AppHeaderProps> = ({
@@ -26,6 +31,10 @@ const AppHeader: React.FC<AppHeaderProps> = ({
   isSearchView,
   searchQuery,
   onSearchChange,
+  academicYears,
+  selectedAcademicYear,
+  onChangeAcademicYear,
+  isCurrentAcademicYear,
 }) => {
   const title =
     currentView === "students"
@@ -46,7 +55,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({
           {title}
         </h1>
 
-        <div>
+        <div className="flex items-center gap-2 shrink-0">
           {myGroups.length > 1 && (
             <select
               className="px-3 py-2 bg-slate-100 rounded-xl text-sm"
@@ -60,6 +69,27 @@ const AppHeader: React.FC<AppHeaderProps> = ({
               ))}
             </select>
           )}
+
+          <select
+            className={`px-3 py-2 rounded-xl text-sm font-bold outline-none cursor-pointer border transition-colors ${
+              isCurrentAcademicYear
+                ? "bg-slate-100 border-transparent text-slate-700"
+                : "bg-amber-100 border-amber-300 text-amber-800"
+            }`}
+            value={selectedAcademicYear.key}
+            onChange={(e) => onChangeAcademicYear(e.target.value)}
+            title={
+              isCurrentAcademicYear
+                ? "Curso académico en curso"
+                : "Estás consultando un curso académico pasado"
+            }
+          >
+            {academicYears.map((year) => (
+              <option key={year.key} value={year.key}>
+                {year.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

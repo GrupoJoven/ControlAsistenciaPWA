@@ -2,12 +2,20 @@ import React, { useMemo, useState } from "react";
 import { AlertTriangle, CalendarDays, ChevronLeft, FolderOpen } from "lucide-react";
 import { Group, Student } from "../types";
 import { getTodayStr } from "../types";
+import { AcademicYear } from "../src/utils/academicYear";
 import Historial from "./Historial";
+import AttendanceDownloadButton from "./AttendanceDownloadButton";
 
 interface HistoricoGruposProps {
   groups: Group[];
   students: Student[];
+  /** Días lectivos del curso seleccionado. */
   classDays: string[];
+  /** Todos los días lectivos, de cualquier curso, para la descarga completa. */
+  allClassDays: string[];
+  academicYear: AcademicYear;
+  availableAcademicYears: AcademicYear[];
+  canEdit: boolean;
   onUpdate: (
     date: string,
     studentId: string,
@@ -21,6 +29,10 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
   groups,
   students,
   classDays,
+  allClassDays,
+  academicYear,
+  availableAcademicYears,
+  canEdit,
   onUpdate,
   isOnline,
 }) => {
@@ -95,6 +107,12 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
       <Historial
         students={selectedGroupStudents}
         classDays={classDays}
+        allClassDays={allClassDays}
+        groups={groups}
+        academicYear={academicYear}
+        availableAcademicYears={availableAcademicYears}
+        canEdit={canEdit}
+        scopeLabel={selectedGroup.name}
         onUpdate={onUpdate}
         isOnline={isOnline}
         parentLabel={selectedGroup.name}
@@ -119,8 +137,21 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
             </p>
           </div>
 
-          <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-xs font-bold">
-            {sortedGroups.length} grupo{sortedGroups.length === 1 ? "" : "s"}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-xs font-bold">
+              {sortedGroups.length} grupo{sortedGroups.length === 1 ? "" : "s"}
+            </div>
+
+            <AttendanceDownloadButton
+              students={students}
+              classDays={allClassDays}
+              groups={groups}
+              availableYears={availableAcademicYears}
+              selectedYear={academicYear}
+              scopeLabel="Todos los grupos"
+              buttonLabel="Descargar todo"
+              variant="onDark"
+            />
           </div>
         </div>
       </div>
@@ -144,11 +175,23 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
               (student) => student.groupId === group.id
             ).length;
 
+            const groupStudents = students.filter(
+              (student) => student.groupId === group.id
+            );
+
             return (
-              <button
+              <div
                 key={group.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedGroupId(group.id)}
-                className="text-left bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all p-5"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedGroupId(group.id);
+                  }
+                }}
+                className="text-left bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all p-5 cursor-pointer"
               >
                 <div className="min-w-0">
                   <p className="text-base font-bold text-slate-900 truncate">
@@ -181,7 +224,20 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
                     </div>
                   )}
                 </div>
-              </button>
+
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <AttendanceDownloadButton
+                    students={groupStudents}
+                    classDays={allClassDays}
+                    groups={groups}
+                    availableYears={availableAcademicYears}
+                    selectedYear={academicYear}
+                    scopeLabel={group.name}
+                    variant="subtle"
+                    className="w-full justify-center"
+                  />
+                </div>
+              </div>
             );
           })}
         </div>
