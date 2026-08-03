@@ -180,9 +180,11 @@ serve(async (req) => {
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GEMINI_API_KEY".toLowerCase()) ?? "";
 
-  // Configurable por secret: Google deja sin cuota gratuita los modelos antiguos
-  // (le pasó a gemini-2.0-flash), así que conviene poder cambiarlo sin desplegar.
-  const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+  // Configurable por secret: Google retira los modelos antiguos por dos vías,
+  // dejándolos sin cuota gratuita (gemini-2.0-flash, 429 con limit 0) o cerrándolos
+  // a claves nuevas (gemini-2.5-flash, 404). Por eso el defecto es el alias móvil,
+  // que Google mantiene apuntando al flash vigente.
+  const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return serverError("Faltan variables de entorno de Supabase (URL/ANON/SERVICE_ROLE).");
