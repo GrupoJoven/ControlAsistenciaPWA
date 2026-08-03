@@ -122,11 +122,20 @@ async function geminiGenerateJSON(args: {
 
   const raw = await resp.text();
   if (!resp.ok) {
+    // 1500 caracteres: con 400 se cortaba justo antes del límite de cuota, que es
+    // el dato que dice si el modelo se ha quedado sin cupo gratuito.
     return {
       summary:
-        `Error Gemini (${resp.status}). ` +
-        (raw?.slice(0, 400) ?? "Sin detalle"),
-      recommendations: ["Intenta de nuevo más tarde", "Revisa la configuración de la IA"],
+        `Error Gemini (${resp.status}) con el modelo "${model}". ` +
+        (raw?.slice(0, 1500) ?? "Sin detalle"),
+      recommendations:
+        resp.status === 429
+          ? [
+              `Comprueba si "${model}" conserva cuota gratuita (si el límite es 0, hay que cambiar de modelo).`,
+              "Cambia el modelo con: supabase secrets set GEMINI_MODEL=<modelo>",
+              "Revisa el consumo en ai.dev/rate-limit",
+            ]
+          : ["Intenta de nuevo más tarde", "Revisa la configuración de la IA"],
     };
   }
 
@@ -170,6 +179,10 @@ serve(async (req) => {
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GEMINI_API_KEY".toLowerCase()) ?? "";
+
+  // Configurable por secret: Google deja sin cuota gratuita los modelos antiguos
+  // (le pasó a gemini-2.0-flash), así que conviene poder cambiarlo sin desplegar.
+  const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return serverError("Faltan variables de entorno de Supabase (URL/ANON/SERVICE_ROLE).");
@@ -398,7 +411,7 @@ serve(async (req) => {
         "Redacta un informe pastoral profesional, concreto y útil para tomar decisiones.";
 
       // Modelo (ajusta si quieres)
-      const model = "gemini-2.0-flash";
+      const model = GEMINI_MODEL;
 
       payload = await geminiGenerateJSON({
         apiKey: GEMINI_API_KEY,
@@ -517,7 +530,7 @@ serve(async (req) => {
       "Eres el Coordinador de Catequesis de la Parroquia San Pascual Baylón. " +
       "Redacta un informe pastoral profesional, concreto y respetuoso.";
 
-    const model = "gemini-2.0-flash";
+    const model = GEMINI_MODEL;
 
     payload = await geminiGenerateJSON({
       apiKey: GEMINI_API_KEY,
