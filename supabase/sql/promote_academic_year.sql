@@ -16,15 +16,43 @@
 --   4. Y solo entonces se renombra la cadena de cursos.
 -- ============================================================================
 
+-- Registro de promociones ya realizadas.
+--
+-- Sustituye a la heurística anterior ("si no queda ningún grupo 1º
+-- PRECONFIRMACIÓN es que ya se promocionó"), que se rearmaba sola: en cuanto se
+-- daba de alta el grupo de entrada del curso nuevo, la condición volvía a
+-- cumplirse y el botón permitía promocionar por segunda vez, borrando la
+-- promoción recién hecha.
+CREATE TABLE IF NOT EXISTS public.academic_year_promotions (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Año de inicio del curso al que se promociona: 2026 para el CURSO 26-27.
+  academic_year_start int NOT NULL UNIQUE,
+  promoted_at         timestamptz NOT NULL DEFAULT now(),
+  summary             jsonb
+);
+
+ALTER TABLE public.academic_year_promotions ENABLE ROW LEVEL SECURITY;
+
+-- Lectura para cualquier usuario identificado: la app necesita saber si ya se
+-- promocionó para bloquear el botón. No hay política de escritura a propósito;
+-- solo la clave de servicio (la edge function) puede insertar.
+DROP POLICY IF EXISTS "promotions_select_authenticated" ON public.academic_year_promotions;
+CREATE POLICY "promotions_select_authenticated"
+  ON public.academic_year_promotions
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
 CREATE OR REPLACE FUNCTION public.promote_academic_year(p_dry_run boolean DEFAULT false)
 RETURNS jsonb
 LANGUAGE plpgsql
 AS $$
 DECLARE
   v_month              int;
+  v_target_year        int;
+  v_already            timestamptz;
   v_graduating_groups  uuid[];
   v_graduating_students uuid[];
-  v_has_preconf        boolean;
 
   v_deleted_attendance int := 0;
   v_deleted_incidents  int := 0;
@@ -45,11 +73,17 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  SELECT EXISTS (SELECT 1 FROM public.groups WHERE name LIKE '1º PRECONFIRMACIÓN%')
-    INTO v_has_preconf;
+  -- En los tres meses permitidos, el curso de destino es siempre el que empieza
+  -- este mismo año natural: en agosto de 2026 se promociona al CURSO 26-27.
+  v_target_year := EXTRACT(YEAR FROM (now() AT TIME ZONE 'Europe/Madrid'))::int;
 
-  IF NOT v_has_preconf THEN
-    RAISE EXCEPTION 'No existe ningún grupo "1º PRECONFIRMACIÓN": la promoción ya se ejecutó este curso.'
+  SELECT promoted_at INTO v_already
+  FROM public.academic_year_promotions
+  WHERE academic_year_start = v_target_year;
+
+  IF v_already IS NOT NULL THEN
+    RAISE EXCEPTION 'El curso %-% ya se promocionó el %. No se puede repetir.',
+      v_target_year, v_target_year + 1, to_char(v_already AT TIME ZONE 'Europe/Madrid', 'DD/MM/YYYY HH24:MI')
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -126,6 +160,19 @@ BEGIN
       OR name LIKE '2º PRECONFIRMACIÓN%'
       OR name LIKE '1º PRECONFIRMACIÓN%';
   GET DIAGNOSTICS v_renamed = ROW_COUNT;
+
+  -- ------------------------------------------------------- 5. dejar constancia
+  -- Dentro de la misma transacción: si la promoción se deshace, el registro
+  -- también, y el botón vuelve a estar disponible.
+  INSERT INTO public.academic_year_promotions (academic_year_start, summary)
+  VALUES (
+    v_target_year,
+    jsonb_build_object(
+      'alumnos_baja',       coalesce(array_length(v_graduating_students, 1), 0),
+      'grupos_eliminados',  v_deleted_groups,
+      'grupos_renombrados', v_renamed
+    )
+  );
 
   -- p_dry_run permite ensayar la operación completa y descartarla: se calcula
   -- todo de verdad y se deshace al lanzar la excepción, que aborta la transacción.

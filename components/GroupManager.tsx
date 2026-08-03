@@ -9,11 +9,14 @@ import {
   Check,
   X,
   ArrowRightLeft,
-  GraduationCap
+  GraduationCap,
+  UserPlus
 } from 'lucide-react';
 import { Group, Student, User } from '../types';
-import { hasEntryLevelGroups, isPromotionMonth, ENTRY_PREFIX } from '../src/utils/coursePromotion';
+import { isPromotionMonth } from '../src/utils/coursePromotion';
+import { ImportedStudent } from '../src/utils/studentImport';
 import PromoteYearDialog from './PromoteYearDialog';
+import ImportGroupDialog from './ImportGroupDialog';
 
 interface GroupManagerProps {
   groups: Group[];
@@ -21,6 +24,8 @@ interface GroupManagerProps {
   users: User[];
   classDays: string[];
   isOnline: boolean;
+  /** Fecha de la última promoción del curso en marcha, o null si no se ha hecho. */
+  lastPromotionAt: string | null;
   onUpdateGroup: (g: Group) => void;
   onUpdateStudent: (s: Student) => void;
   onAssignCatechist: (
@@ -29,6 +34,11 @@ interface GroupManagerProps {
     assign: boolean
   ) => void;
   onPromoteYear: () => Promise<void>;
+  onCreateGroupWithStudents: (
+    name: string,
+    catechistIds: string[],
+    students: ImportedStudent[]
+  ) => Promise<void>;
 }
 
 const GroupManager: React.FC<GroupManagerProps> = ({
@@ -37,12 +47,15 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   users,
   classDays,
   isOnline,
+  lastPromotionAt,
   onUpdateGroup,
   onUpdateStudent,
   onAssignCatechist,
-  onPromoteYear
+  onPromoteYear,
+  onCreateGroupWithStudents
 }) => {
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [movingStudent, setMovingStudent] = useState<Student | null>(null);
   const [targetGroupId, setTargetGroupId] = useState('');
@@ -115,16 +128,22 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     }
   };
 
-  // El botón solo tiene sentido al principio del curso, y solo mientras exista
-  // algún grupo de entrada: si no queda ninguno, la promoción ya se hizo.
+  // El botón solo tiene sentido al principio del curso y una única vez.
+  // Se comprueba contra el registro de promociones, no contra la existencia de
+  // grupos de entrada: esa heurística se rearmaba en cuanto se creaba el grupo
+  // de entrada del curso nuevo, permitiendo promocionar dos veces.
   const inPromotionWindow = isPromotionMonth();
-  const hasEntryGroups = hasEntryLevelGroups(groups);
-  const canPromote = inPromotionWindow && hasEntryGroups && isOnline;
+  const alreadyPromoted = lastPromotionAt !== null;
+  const canPromote = inPromotionWindow && !alreadyPromoted && isOnline;
 
   const promoteBlockedReason = !inPromotionWindow
     ? 'Solo se puede promocionar en agosto, septiembre u octubre.'
-    : !hasEntryGroups
-    ? `No queda ningún grupo "${ENTRY_PREFIX}", así que la promoción ya se ha hecho este curso.`
+    : alreadyPromoted
+    ? `Ya se promocionó el ${new Date(lastPromotionAt!).toLocaleDateString('es-ES', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })}. No se puede repetir este curso.`
     : !isOnline
     ? 'Necesitas conexión para promocionar el curso.'
     : '';
@@ -159,6 +178,18 @@ const GroupManager: React.FC<GroupManagerProps> = ({
         </button>
       </div>
 
+      {showImportDialog && (
+        <ImportGroupDialog
+          groups={groups}
+          catechists={catechists}
+          onClose={() => setShowImportDialog(false)}
+          onCreate={async (name, catechistIds, importedStudents) => {
+            await onCreateGroupWithStudents(name, catechistIds, importedStudents);
+            setShowImportDialog(false);
+          }}
+        />
+      )}
+
       {showPromoteDialog && (
         <PromoteYearDialog
           groups={groups}
@@ -171,6 +202,28 @@ const GroupManager: React.FC<GroupManagerProps> = ({
           }}
         />
       )}
+
+      <div className="flex items-center justify-between gap-4 pt-2">
+        <h3 className="font-extrabold text-slate-900">
+          Grupos
+          <span className="ml-2 text-sm font-bold text-slate-400">{groups.length}</span>
+        </h3>
+
+        <button
+          type="button"
+          disabled={!isOnline}
+          onClick={() => setShowImportDialog(true)}
+          title={isOnline ? undefined : 'Necesitas conexión para crear un grupo.'}
+          className={`px-5 py-3 rounded-2xl font-extrabold text-sm shrink-0 transition-colors flex items-center gap-2 ${
+            isOnline
+              ? 'bg-white text-indigo-700 border border-indigo-300 hover:bg-indigo-50'
+              : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+          }`}
+        >
+          <UserPlus size={18} />
+          CREAR GRUPO NUEVO
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {groups.map(group => (

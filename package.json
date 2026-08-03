@@ -9,11 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.44.0",
     "@supabase/supabase-js": "^2.95.3",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "read-excel-file": "^9.3.5",
     "recharts": "^3.8.0"
   },
   "devDependencies": {

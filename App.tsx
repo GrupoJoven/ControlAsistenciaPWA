@@ -71,6 +71,8 @@ import {
   StudentBirthdayInfo,
 } from "./src/types/app";
 
+import { ImportedStudent } from "./src/utils/studentImport";
+
 import {
   filterDatesByAcademicYear,
   findAcademicYearByKey,
@@ -98,6 +100,7 @@ const App: React.FC = () => {
   // Para catequistas con varios grupos: cuál está “activo” en la UI
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [selectedAcademicYearKey, setSelectedAcademicYearKey] = useState<string | null>(null);
+  const [lastPromotionAt, setLastPromotionAt] = useState<string | null>(null);
 
   const [baseDataLoaded, setBaseDataLoaded] = useState(false);
   const [todayBirthdays, setTodayBirthdays] = useState<BirthdayInfo[]>([]);
@@ -442,6 +445,22 @@ const App: React.FC = () => {
     }));
 
     setStudents(studentsWithAttendance);
+
+    // --- promoción de curso ya realizada ---
+    // En agosto, septiembre y octubre el curso de destino es el que empieza este
+    // mismo año natural, igual que calcula promote_academic_year().
+    try {
+      const { data: promotionData } = await supabase
+        .from("academic_year_promotions")
+        .select("promoted_at")
+        .eq("academic_year_start", new Date().getFullYear())
+        .maybeSingle();
+
+      setLastPromotionAt(promotionData?.promoted_at ?? null);
+    } catch {
+      // Si no se puede leer, se deja bloqueado el botón: es el lado seguro.
+      setLastPromotionAt(new Date().toISOString());
+    }
 
     // --- parish_events ---
     const eventsMapped = await loadEvents();
@@ -1328,6 +1347,36 @@ const App: React.FC = () => {
     );
   };
 
+  /**
+   * Alta de un grupo completo desde un fichero. La RPC valida nombre, columnas
+   * y DNIs, y crea grupo, asignaciones y alumnos en una sola transacción: si
+   * una fila falla no queda un grupo vacío a medio poblar.
+   */
+  const createGroupWithStudents = async (
+    name: string,
+    catechistIds: string[],
+    importedStudents: ImportedStudent[]
+  ) => {
+    if (!currentUser) throw new Error("Sesión no válida.");
+    if (blockIfOffline("crear el grupo")) throw new Error("Sin conexión.");
+
+    const { data, error } = await supabase.rpc("create_group_with_students", {
+      p_name: name,
+      p_catechist_ids: catechistIds,
+      p_students: importedStudents,
+    });
+
+    if (error) throw new Error(error.message ?? "No se pudo crear el grupo.");
+
+    await loadBaseData(currentUser);
+
+    alert(
+      `Grupo "${data?.group_name ?? name}" creado.\n\n` +
+        `Alumnos dados de alta: ${data?.alumnos_creados ?? 0}\n` +
+        `Catequistas asignados: ${data?.catequistas_asignados ?? 0}`
+    );
+  };
+
   const toggleClassDay = async (date: string) => {
     if (blockIfOffline("modificar el calendario lectivo")) return;
     const exists = classDays.includes(date);
@@ -1712,10 +1761,12 @@ const App: React.FC = () => {
               users={users}
               classDays={classDays}
               isOnline={isOnline}
+              lastPromotionAt={lastPromotionAt}
               onUpdateGroup={(g) => void updateGroup(g)}
               onUpdateStudent={(s) => void updateStudent(s)}
               onAssignCatechist={(uid, gid, assign) => void setCatechistInGroup(uid, gid, assign)}
               onPromoteYear={promoteAcademicYear}
+              onCreateGroupWithStudents={createGroupWithStudents}
             />
           )}
 
