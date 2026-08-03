@@ -1296,6 +1296,38 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Promoción de curso. Todo el trabajo se hace en la edge function, que a su
+   * vez delega en una función de Postgres transaccional: el cliente no borra
+   * nada por su cuenta. Al terminar se recargan los datos porque han cambiado
+   * grupos, alumnos y asistencia a la vez.
+   */
+  const promoteAcademicYear = async () => {
+    if (!currentUser) throw new Error("Sesión no válida.");
+    if (blockIfOffline("promocionar el curso")) {
+      throw new Error("Sin conexión.");
+    }
+
+    const { data, error } = await supabase.functions.invoke("promote-academic-year", {
+      body: {},
+    });
+
+    if (error) throw new Error(error.message ?? "Error al promocionar el curso.");
+    if (data?.error) throw new Error(data.error);
+
+    await loadBaseData(currentUser);
+
+    const bajas = data?.alumnos_dados_de_baja ?? 0;
+    const renombrados = data?.grupos_renombrados ?? 0;
+
+    alert(
+      `Curso promocionado.\n\n` +
+        `Grupos renombrados: ${renombrados}\n` +
+        `Alumnos dados de baja: ${bajas}\n` +
+        `Grupos eliminados: ${data?.grupos_eliminados ?? 0}`
+    );
+  };
+
   const toggleClassDay = async (date: string) => {
     if (blockIfOffline("modificar el calendario lectivo")) return;
     const exists = classDays.includes(date);
@@ -1678,9 +1710,12 @@ const App: React.FC = () => {
               groups={groupsWithCatechists}
               students={students}
               users={users}
+              classDays={classDays}
+              isOnline={isOnline}
               onUpdateGroup={(g) => void updateGroup(g)}
               onUpdateStudent={(s) => void updateStudent(s)}
               onAssignCatechist={(uid, gid, assign) => void setCatechistInGroup(uid, gid, assign)}
+              onPromoteYear={promoteAcademicYear}
             />
           )}
 

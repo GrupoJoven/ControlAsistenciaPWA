@@ -1,6 +1,6 @@
 
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   ChevronRight,
@@ -8,14 +8,19 @@ import {
   User as UserIcon,
   Check,
   X,
-  ArrowRightLeft
+  ArrowRightLeft,
+  GraduationCap
 } from 'lucide-react';
 import { Group, Student, User } from '../types';
+import { hasEntryLevelGroups, isPromotionMonth, ENTRY_PREFIX } from '../src/utils/coursePromotion';
+import PromoteYearDialog from './PromoteYearDialog';
 
 interface GroupManagerProps {
   groups: Group[];
   students: Student[];
   users: User[];
+  classDays: string[];
+  isOnline: boolean;
   onUpdateGroup: (g: Group) => void;
   onUpdateStudent: (s: Student) => void;
   onAssignCatechist: (
@@ -23,16 +28,21 @@ interface GroupManagerProps {
     groupId: string | null,
     assign: boolean
   ) => void;
+  onPromoteYear: () => Promise<void>;
 }
 
-const GroupManager: React.FC<GroupManagerProps> = ({ 
-  groups, 
-  students, 
-  users, 
+const GroupManager: React.FC<GroupManagerProps> = ({
+  groups,
+  students,
+  users,
+  classDays,
+  isOnline,
   onUpdateGroup,
   onUpdateStudent,
-  onAssignCatechist 
+  onAssignCatechist,
+  onPromoteYear
 }) => {
+  const [showPromoteDialog, setShowPromoteDialog] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [movingStudent, setMovingStudent] = useState<Student | null>(null);
   const [targetGroupId, setTargetGroupId] = useState('');
@@ -105,8 +115,63 @@ const GroupManager: React.FC<GroupManagerProps> = ({
     }
   };
 
+  // El botón solo tiene sentido al principio del curso, y solo mientras exista
+  // algún grupo de entrada: si no queda ninguno, la promoción ya se hizo.
+  const inPromotionWindow = isPromotionMonth();
+  const hasEntryGroups = hasEntryLevelGroups(groups);
+  const canPromote = inPromotionWindow && hasEntryGroups && isOnline;
+
+  const promoteBlockedReason = !inPromotionWindow
+    ? 'Solo se puede promocionar en agosto, septiembre u octubre.'
+    : !hasEntryGroups
+    ? `No queda ningún grupo "${ENTRY_PREFIX}", así que la promoción ya se ha hecho este curso.`
+    : !isOnline
+    ? 'Necesitas conexión para promocionar el curso.'
+    : '';
+
   return (
     <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-extrabold text-slate-900 flex items-center gap-2">
+            <GraduationCap size={20} className="text-indigo-600 shrink-0" />
+            Cambio de curso
+          </h3>
+          <p className="text-sm text-slate-500 mt-1">
+            {canPromote
+              ? 'Sube todos los grupos un nivel y da de baja a los que terminan la catequesis.'
+              : promoteBlockedReason}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={!canPromote}
+          onClick={() => setShowPromoteDialog(true)}
+          title={canPromote ? undefined : promoteBlockedReason}
+          className={`px-5 py-3 rounded-2xl font-extrabold text-sm shrink-0 transition-colors ${
+            canPromote
+              ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm'
+              : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+          }`}
+        >
+          NUEVO CURSO
+        </button>
+      </div>
+
+      {showPromoteDialog && (
+        <PromoteYearDialog
+          groups={groups}
+          students={students}
+          classDays={classDays}
+          onClose={() => setShowPromoteDialog(false)}
+          onConfirm={async () => {
+            await onPromoteYear();
+            setShowPromoteDialog(false);
+          }}
+        />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {groups.map(group => (
           <div 
