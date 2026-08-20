@@ -16,6 +16,11 @@ import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
 
 interface DashboardProps {
   students: Student[];
+  /**
+   * TODOS los eventos de la agenda parroquial, sin filtrar por curso: el panel
+   * "Próximos Eventos" debe mostrar siempre lo que aún no ha pasado, aunque
+   * caiga en un curso distinto al seleccionado en el selector.
+   */
   events: ParishEvent[];
   onManageAgenda?: () => void;
   classDays: string[];
@@ -35,13 +40,22 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
     atRisk: students.filter(s => calculateStudentRate(s, classDays, academicYear) < 60).length,
   };
 
-  // Filter and sort only future events
+  // Solo los eventos que aún no han pasado, ordenados de más próximo a más
+  // lejano. No se filtra por curso a propósito (ver DashboardProps.events).
   const upcomingEvents = useMemo(() => {
     const nowTs = Date.now();
 
+    // parish_events.date es "timestamp without time zone", así que llega como
+    // "2026-09-11T18:00:00" y se interpreta en hora local. El replace cubre la
+    // variante con espacio ("2026-09-11 18:00:00"), que Safari no sabe parsear.
+    const toTs = (date: string) => new Date(String(date).replace(" ", "T")).getTime();
+
     return events
-      .filter(event => new Date(event.date).getTime() >= nowTs)
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .filter(event => {
+        const ts = toTs(event.date);
+        return Number.isFinite(ts) && ts >= nowTs;
+      })
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   }, [events]);
 
   // Monthly chart data based on the selected academic year class days

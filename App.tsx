@@ -605,14 +605,22 @@ const App: React.FC = () => {
     [classDays, selectedAcademicYear]
   );
 
+  // parish_events.date es un timestamp ("2026-09-11T18:00:00"), así que hay que
+  // comparar solo la parte YYYY-MM-DD: si no, un evento del último día del curso
+  // ("2026-08-31T18:00:00" > "2026-08-31") se quedaría fuera.
   const academicYearEvents = useMemo(
     () =>
-      events.filter(
-        (event) =>
-          event.date >= selectedAcademicYear.start && event.date <= selectedAcademicYear.end
-      ),
+      events.filter((event) => {
+        const day = String(event.date).slice(0, 10);
+        return day >= selectedAcademicYear.start && day <= selectedAcademicYear.end;
+      }),
     [events, selectedAcademicYear]
   );
+
+  // Los "Próximos Eventos" del Resumen son siempre todos los eventos futuros de
+  // la agenda parroquial, pertenezcan al curso que pertenezcan. Por eso NO se
+  // filtran por `selectedAcademicYear`: el Dashboard ya se queda solo con los
+  // que aún no han pasado.
   const persistStudentAttendance = async (
     date: string,
     studentId: string,
@@ -1628,7 +1636,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'dashboard' && <Dashboard students={students} events={academicYearEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
+          {currentView === 'dashboard' && <Dashboard students={students} events={events} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
           {currentView === 'attendance' && (
             <AttendanceTracker
               students={myCatecumenos}

@@ -1,0 +1,4231 @@
+La estructura de mi base de datos de supabase es la siguiente:
+
+[
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "indice": "academic_year_promotions_academic_year_start_key",
+    "definicion": "CREATE UNIQUE INDEX academic_year_promotions_academic_year_start_key ON public.academic_year_promotions USING btree (academic_year_start)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "indice": "academic_year_promotions_pkey",
+    "definicion": "CREATE UNIQUE INDEX academic_year_promotions_pkey ON public.academic_year_promotions USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "indice": "birthday_push_log_pkey",
+    "definicion": "CREATE UNIQUE INDEX birthday_push_log_pkey ON public.birthday_push_log USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "indice": "birthday_push_log_unique",
+    "definicion": "CREATE UNIQUE INDEX birthday_push_log_unique ON public.birthday_push_log USING btree (notification_day, recipient_id, notification_kind)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "indice": "idx_birthday_push_log_day",
+    "definicion": "CREATE INDEX idx_birthday_push_log_day ON public.birthday_push_log USING btree (notification_day)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "indice": "catechist_attendance_date_idx",
+    "definicion": "CREATE INDEX catechist_attendance_date_idx ON public.catechist_attendance USING btree (date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "indice": "catechist_attendance_pkey",
+    "definicion": "CREATE UNIQUE INDEX catechist_attendance_pkey ON public.catechist_attendance USING btree (profile_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "indice": "catechist_attendance_profile_idx",
+    "definicion": "CREATE INDEX catechist_attendance_profile_idx ON public.catechist_attendance USING btree (profile_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "indice": "catechist_att_events_date_idx",
+    "definicion": "CREATE INDEX catechist_att_events_date_idx ON public.catechist_attendance_events USING btree (date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "indice": "catechist_att_events_event_date_idx",
+    "definicion": "CREATE INDEX catechist_att_events_event_date_idx ON public.catechist_attendance_events USING btree (event_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "indice": "catechist_att_events_profile_date_idx",
+    "definicion": "CREATE INDEX catechist_att_events_profile_date_idx ON public.catechist_attendance_events USING btree (profile_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "indice": "catechist_attendance_events_pkey",
+    "definicion": "CREATE UNIQUE INDEX catechist_attendance_events_pkey ON public.catechist_attendance_events USING btree (profile_id, event_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "class_days",
+    "indice": "class_days_pkey",
+    "definicion": "CREATE UNIQUE INDEX class_days_pkey ON public.class_days USING btree (date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_desktop_token_hash_key",
+    "definicion": "CREATE UNIQUE INDEX dni_verification_sessions_desktop_token_hash_key ON public.dni_verification_sessions USING btree (desktop_token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_expires_idx",
+    "definicion": "CREATE INDEX dni_verification_sessions_expires_idx ON public.dni_verification_sessions USING btree (expires_at)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_form_idx",
+    "definicion": "CREATE INDEX dni_verification_sessions_form_idx ON public.dni_verification_sessions USING btree (registration_form_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_mobile_token_hash_key",
+    "definicion": "CREATE UNIQUE INDEX dni_verification_sessions_mobile_token_hash_key ON public.dni_verification_sessions USING btree (mobile_token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_pkey",
+    "definicion": "CREATE UNIQUE INDEX dni_verification_sessions_pkey ON public.dni_verification_sessions USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "indice": "dni_verification_sessions_status_idx",
+    "definicion": "CREATE INDEX dni_verification_sessions_status_idx ON public.dni_verification_sessions USING btree (status)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_name_normalized_idx",
+    "definicion": "CREATE INDEX drive_index_items_name_normalized_idx ON public.drive_index_items USING btree (user_id, name_normalized)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_name_trgm_idx",
+    "definicion": "CREATE INDEX drive_index_items_name_trgm_idx ON public.drive_index_items USING gin (name_normalized gin_trgm_ops)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_path_trgm_idx",
+    "definicion": "CREATE INDEX drive_index_items_path_trgm_idx ON public.drive_index_items USING gin (path gin_trgm_ops)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_pkey",
+    "definicion": "CREATE UNIQUE INDEX drive_index_items_pkey ON public.drive_index_items USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_file_unique",
+    "definicion": "CREATE UNIQUE INDEX drive_index_items_user_file_unique ON public.drive_index_items USING btree (user_id, file_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_is_folder_idx",
+    "definicion": "CREATE INDEX drive_index_items_user_is_folder_idx ON public.drive_index_items USING btree (user_id, is_folder)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_modified_idx",
+    "definicion": "CREATE INDEX drive_index_items_user_modified_idx ON public.drive_index_items USING btree (user_id, modified_time DESC)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_parent_idx",
+    "definicion": "CREATE INDEX drive_index_items_user_parent_idx ON public.drive_index_items USING btree (user_id, parent_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_root_idx",
+    "definicion": "CREATE INDEX drive_index_items_user_root_idx ON public.drive_index_items USING btree (user_id, root_folder_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "indice": "drive_index_items_user_trashed_idx",
+    "definicion": "CREATE INDEX drive_index_items_user_trashed_idx ON public.drive_index_items USING btree (user_id, trashed)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "indice": "drive_sync_state_pkey",
+    "definicion": "CREATE UNIQUE INDEX drive_sync_state_pkey ON public.drive_sync_state USING btree (user_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "indice": "google_drive_connections_pkey",
+    "definicion": "CREATE UNIQUE INDEX google_drive_connections_pkey ON public.google_drive_connections USING btree (user_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "indice": "google_form_events_pkey",
+    "definicion": "CREATE UNIQUE INDEX google_form_events_pkey ON public.google_form_events USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "indice": "google_form_events_pubsub_message_id_uidx",
+    "definicion": "CREATE UNIQUE INDEX google_form_events_pubsub_message_id_uidx ON public.google_form_events USING btree (pubsub_message_id) WHERE (pubsub_message_id IS NOT NULL)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "indice": "idx_google_form_events_google_form_id",
+    "definicion": "CREATE INDEX idx_google_form_events_google_form_id ON public.google_form_events USING btree (google_form_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "indice": "idx_google_form_events_processing_status",
+    "definicion": "CREATE INDEX idx_google_form_events_processing_status ON public.google_form_events USING btree (processing_status)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "indice": "google_form_processed_responses_google_form_id_response_id_key",
+    "definicion": "CREATE UNIQUE INDEX google_form_processed_responses_google_form_id_response_id_key ON public.google_form_processed_responses USING btree (google_form_id, response_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "indice": "google_form_processed_responses_google_form_id_response_id_uidx",
+    "definicion": "CREATE UNIQUE INDEX google_form_processed_responses_google_form_id_response_id_uidx ON public.google_form_processed_responses USING btree (google_form_id, response_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "indice": "google_form_processed_responses_pkey",
+    "definicion": "CREATE UNIQUE INDEX google_form_processed_responses_pkey ON public.google_form_processed_responses USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "indice": "idx_google_form_processed_responses_status",
+    "definicion": "CREATE INDEX idx_google_form_processed_responses_status ON public.google_form_processed_responses USING btree (processing_status)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "indice": "google_form_watches_pkey",
+    "definicion": "CREATE UNIQUE INDEX google_form_watches_pkey ON public.google_form_watches USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "indice": "idx_google_form_watches_google_form_id",
+    "definicion": "CREATE INDEX idx_google_form_watches_google_form_id ON public.google_form_watches USING btree (google_form_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "indice": "idx_google_form_watches_registration_form_id",
+    "definicion": "CREATE INDEX idx_google_form_watches_registration_form_id ON public.google_form_watches USING btree (registration_form_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "indice": "idx_google_form_watches_status",
+    "definicion": "CREATE INDEX idx_google_form_watches_status ON public.google_form_watches USING btree (status)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "indice": "google_oauth_tokens_pkey",
+    "definicion": "CREATE UNIQUE INDEX google_oauth_tokens_pkey ON public.google_oauth_tokens USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "indice": "google_oauth_tokens_provider_key",
+    "definicion": "CREATE UNIQUE INDEX google_oauth_tokens_provider_key ON public.google_oauth_tokens USING btree (provider)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "indice": "group_catechist_pkey",
+    "definicion": "CREATE UNIQUE INDEX group_catechist_pkey ON public.group_catechist USING btree (group_id, profile_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "groups",
+    "indice": "groups_pkey",
+    "definicion": "CREATE UNIQUE INDEX groups_pkey ON public.groups USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "indice": "idx_incidents_incident_date",
+    "definicion": "CREATE INDEX idx_incidents_incident_date ON public.incidents USING btree (incident_date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "indice": "idx_incidents_profile_id",
+    "definicion": "CREATE INDEX idx_incidents_profile_id ON public.incidents USING btree (profile_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "indice": "idx_incidents_student_date",
+    "definicion": "CREATE INDEX idx_incidents_student_date ON public.incidents USING btree (student_id, incident_date DESC)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "indice": "idx_incidents_student_id",
+    "definicion": "CREATE INDEX idx_incidents_student_id ON public.incidents USING btree (student_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "indice": "incidents_pkey",
+    "definicion": "CREATE UNIQUE INDEX incidents_pkey ON public.incidents USING btree (incident_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "indice": "mass_services_pkey",
+    "definicion": "CREATE UNIQUE INDEX mass_services_pkey ON public.mass_services USING btree (student_id, service_type)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "indice": "monthly_reports_pkey",
+    "definicion": "CREATE UNIQUE INDEX monthly_reports_pkey ON public.monthly_reports USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "indice": "monthly_reports_unique",
+    "definicion": "CREATE UNIQUE INDEX monthly_reports_unique ON public.monthly_reports USING btree (scope, scope_id, month)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "indice": "idx_parent_email_verification_tokens_normalized_email",
+    "definicion": "CREATE INDEX idx_parent_email_verification_tokens_normalized_email ON public.parent_email_verification_tokens USING btree (normalized_email)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "indice": "idx_parent_email_verification_tokens_public_id",
+    "definicion": "CREATE INDEX idx_parent_email_verification_tokens_public_id ON public.parent_email_verification_tokens USING btree (public_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "indice": "idx_parent_email_verification_tokens_student_id",
+    "definicion": "CREATE INDEX idx_parent_email_verification_tokens_student_id ON public.parent_email_verification_tokens USING btree (student_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "indice": "parent_email_verification_tokens_pkey",
+    "definicion": "CREATE UNIQUE INDEX parent_email_verification_tokens_pkey ON public.parent_email_verification_tokens USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "indice": "parent_email_verification_tokens_token_hash_key",
+    "definicion": "CREATE UNIQUE INDEX parent_email_verification_tokens_token_hash_key ON public.parent_email_verification_tokens USING btree (token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "indice": "idx_parent_email_verifications_normalized_email",
+    "definicion": "CREATE INDEX idx_parent_email_verifications_normalized_email ON public.parent_email_verifications USING btree (normalized_email)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "indice": "parent_email_verifications_normalized_email_key",
+    "definicion": "CREATE UNIQUE INDEX parent_email_verifications_normalized_email_key ON public.parent_email_verifications USING btree (normalized_email)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "indice": "parent_email_verifications_pkey",
+    "definicion": "CREATE UNIQUE INDEX parent_email_verifications_pkey ON public.parent_email_verifications USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parish_events",
+    "indice": "parish_events_pkey",
+    "definicion": "CREATE UNIQUE INDEX parish_events_pkey ON public.parish_events USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "indice": "profiles_pkey",
+    "definicion": "CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "idx_public_form_email_verification_tokens_expires_at",
+    "definicion": "CREATE INDEX idx_public_form_email_verification_tokens_expires_at ON public.public_form_email_verification_tokens USING btree (expires_at)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "idx_public_form_email_verification_tokens_form_id",
+    "definicion": "CREATE INDEX idx_public_form_email_verification_tokens_form_id ON public.public_form_email_verification_tokens USING btree (registration_form_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "idx_public_form_email_verification_tokens_normalized_email",
+    "definicion": "CREATE INDEX idx_public_form_email_verification_tokens_normalized_email ON public.public_form_email_verification_tokens USING btree (normalized_email)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "public_form_email_tokens_dni_session_idx",
+    "definicion": "CREATE INDEX public_form_email_tokens_dni_session_idx ON public.public_form_email_verification_tokens USING btree (dni_verification_session_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "public_form_email_verification_tokens_pkey",
+    "definicion": "CREATE UNIQUE INDEX public_form_email_verification_tokens_pkey ON public.public_form_email_verification_tokens USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "indice": "public_form_email_verification_tokens_token_hash_key",
+    "definicion": "CREATE UNIQUE INDEX public_form_email_verification_tokens_token_hash_key ON public.public_form_email_verification_tokens USING btree (token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "indice": "idx_push_endpoint_unique",
+    "definicion": "CREATE UNIQUE INDEX idx_push_endpoint_unique ON public.push_subscriptions USING btree (endpoint)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "indice": "idx_push_subscriptions_user",
+    "definicion": "CREATE INDEX idx_push_subscriptions_user ON public.push_subscriptions USING btree (user_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "indice": "push_subscriptions_pkey",
+    "definicion": "CREATE UNIQUE INDEX push_subscriptions_pkey ON public.push_subscriptions USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "indice": "registration_form_groups_pkey",
+    "definicion": "CREATE UNIQUE INDEX registration_form_groups_pkey ON public.registration_form_groups USING btree (form_id, group_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "indice": "registration_forms_pkey",
+    "definicion": "CREATE UNIQUE INDEX registration_forms_pkey ON public.registration_forms USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "indice": "idx_school_names_name",
+    "definicion": "CREATE INDEX idx_school_names_name ON public.school_names USING btree (name)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "indice": "school_names_name_unique",
+    "definicion": "CREATE UNIQUE INDEX school_names_name_unique ON public.school_names USING btree (name)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "indice": "school_names_pkey",
+    "definicion": "CREATE UNIQUE INDEX school_names_pkey ON public.school_names USING btree (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "indice": "student_attendance_pkey",
+    "definicion": "CREATE UNIQUE INDEX student_attendance_pkey ON public.student_attendance USING btree (student_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "indice": "student_public_access_pkey",
+    "definicion": "CREATE UNIQUE INDEX student_public_access_pkey ON public.student_public_access USING btree (student_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "indice": "student_public_access_public_id_key",
+    "definicion": "CREATE UNIQUE INDEX student_public_access_public_id_key ON public.student_public_access USING btree (public_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "indice": "students_pkey",
+    "definicion": "CREATE UNIQUE INDEX students_pkey ON public.students USING btree (id)"
+  }
+]
+
+[
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "restriccion": "academic_year_promotions_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "restriccion": "academic_year_promotions_academic_year_start_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (academic_year_start)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "restriccion": "birthday_push_log_recipient_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (recipient_id) REFERENCES profiles(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "restriccion": "birthday_push_log_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "restriccion": "birthday_push_log_unique",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (notification_day, recipient_id, notification_kind)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "restriccion": "catechist_attendance_profile_fk",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "restriccion": "catechist_attendance_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (profile_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "restriccion": "catechist_attendance_events_status_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((status = ANY (ARRAY['present'::text, 'absent'::text, 'late'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "restriccion": "catechist_attendance_events_event_fk",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (event_id) REFERENCES parish_events(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "restriccion": "catechist_attendance_events_profile_fk",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "restriccion": "catechist_attendance_events_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (profile_id, event_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "class_days",
+    "restriccion": "class_days_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "restriccion": "dni_verification_sessions_status_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((status = ANY (ARRAY['pending'::text, 'capturing'::text, 'front_uploaded'::text, 'processing'::text, 'extracted'::text, 'confirmed'::text, 'failed'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "restriccion": "dni_verification_sessions_registration_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (registration_form_id) REFERENCES registration_forms(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "restriccion": "dni_verification_sessions_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "restriccion": "dni_verification_sessions_desktop_token_hash_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (desktop_token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "restriccion": "dni_verification_sessions_mobile_token_hash_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (mobile_token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "restriccion": "drive_index_items_user_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "restriccion": "drive_index_items_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "restriccion": "drive_index_items_user_file_unique",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (user_id, file_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "restriccion": "drive_sync_state_sync_status_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((sync_status = ANY (ARRAY['idle'::text, 'indexing'::text, 'syncing'::text, 'error'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "restriccion": "drive_sync_state_user_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "restriccion": "drive_sync_state_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (user_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "restriccion": "google_drive_connections_user_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "restriccion": "google_drive_connections_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (user_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "restriccion": "google_form_events_registration_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (registration_form_id) REFERENCES registration_forms(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "restriccion": "google_form_events_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "restriccion": "google_form_processed_responses_last_event_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (last_event_id) REFERENCES google_form_events(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "restriccion": "google_form_processed_responses_registration_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (registration_form_id) REFERENCES registration_forms(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "restriccion": "google_form_processed_responses_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "restriccion": "google_form_processed_responses_google_form_id_response_id_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (google_form_id, response_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "restriccion": "google_form_watches_registration_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (registration_form_id) REFERENCES registration_forms(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "restriccion": "google_form_watches_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "restriccion": "google_oauth_tokens_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "restriccion": "google_oauth_tokens_provider_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (provider)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "restriccion": "group_catechist_group_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (group_id) REFERENCES groups(id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "restriccion": "group_catechist_profile_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (profile_id) REFERENCES profiles(id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "restriccion": "group_catechist_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (group_id, profile_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "groups",
+    "restriccion": "groups_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "restriccion": "incidents_incident_date_not_future",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((incident_date <= CURRENT_DATE))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "restriccion": "fk_incidents_profile",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "restriccion": "fk_incidents_student",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "restriccion": "incidents_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (incident_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "restriccion": "mass_services_service_type_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((service_type)::text = ANY ((ARRAY['B'::character varying, 'L'::character varying, 'P'::character varying])::text[])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "restriccion": "mass_services_student_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "restriccion": "mass_services_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (student_id, service_type)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "restriccion": "monthly_reports_report_type_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((report_type = ANY (ARRAY['students'::text, 'catechists'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "restriccion": "monthly_reports_scope_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((((scope = 'group'::report_scope) AND (scope_id IS NOT NULL)) OR ((scope <> 'group'::report_scope) AND (scope_id IS NULL))))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "restriccion": "monthly_reports_generated_by_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (generated_by) REFERENCES auth.users(id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "restriccion": "monthly_reports_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "restriccion": "parent_email_verification_tokens_student_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "restriccion": "parent_email_verification_tokens_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "restriccion": "parent_email_verification_tokens_token_hash_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "restriccion": "parent_email_verifications_last_student_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (last_student_id) REFERENCES students(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "restriccion": "parent_email_verifications_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "restriccion": "parent_email_verifications_normalized_email_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (normalized_email)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parish_events",
+    "restriccion": "parish_events_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "restriccion": "profiles_role_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((role = ANY (ARRAY['coordinator'::text, 'catechist'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "restriccion": "profiles_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "restriccion": "profiles_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "restriccion": "public_form_email_verification_dni_verification_session_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (dni_verification_session_id) REFERENCES dni_verification_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "restriccion": "public_form_email_verification_tokens_registration_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (registration_form_id) REFERENCES registration_forms(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "restriccion": "public_form_email_verification_tokens_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "restriccion": "public_form_email_verification_tokens_token_hash_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (token_hash)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "restriccion": "push_subscriptions_user_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "restriccion": "push_subscriptions_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "restriccion": "registration_form_groups_form_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (form_id) REFERENCES registration_forms(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "restriccion": "registration_form_groups_group_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "restriccion": "registration_form_groups_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (form_id, group_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "restriccion": "registration_forms_access_type_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK ((access_type = ANY (ARRAY['public'::text, 'restricted'::text])))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "restriccion": "registration_forms_dni_verification_public_only",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((dni_verification_enabled = false) OR (access_type = 'public'::text)))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "restriccion": "registration_forms_open_before_close_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((open_date IS NULL) OR (close_date IS NULL) OR (close_date > open_date)))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "restriccion": "registration_forms_underage_requires_dni_verification",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((prefill_underage_enabled = false) OR (dni_verification_enabled = true)))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "restriccion": "registration_forms_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "restriccion": "school_names_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "restriccion": "school_names_name_unique",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (name)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "restriccion": "student_attendance_student_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "restriccion": "student_attendance_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (student_id, date)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "restriccion": "student_public_access_student_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "restriccion": "student_public_access_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (student_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "restriccion": "student_public_access_public_id_key",
+    "tipo": "UNIQUE",
+    "definicion": "UNIQUE (public_id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_dni_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((dni IS NULL) OR (TRIM(BOTH FROM dni) = ''::text) OR is_valid_spanish_dni_nie(dni)))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_dni_valid",
+    "tipo": "CHECK",
+    "definicion": "CHECK (is_valid_spanish_dni_nie(dni))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_gender_check",
+    "tipo": "CHECK",
+    "definicion": "CHECK (((gender = ANY (ARRAY['male'::text, 'female'::text])) OR (gender IS NULL)))"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_group_id_fkey",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (group_id) REFERENCES groups(id)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_school_fk",
+    "tipo": "FOREIGN KEY",
+    "definicion": "FOREIGN KEY (school) REFERENCES school_names(name) ON UPDATE CASCADE ON DELETE RESTRICT"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "restriccion": "students_pkey",
+    "tipo": "PRIMARY KEY",
+    "definicion": "PRIMARY KEY (id)"
+  }
+]
+
+[
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "posicion": 2,
+    "columna": "academic_year_start",
+    "tipo_dato": "integer",
+    "longitud_maxima": null,
+    "precision_numerica": 32,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "posicion": 3,
+    "columna": "promoted_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "academic_year_promotions",
+    "posicion": 4,
+    "columna": "summary",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 2,
+    "columna": "notification_day",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 3,
+    "columna": "recipient_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 4,
+    "columna": "notification_kind",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 5,
+    "columna": "birthday_count",
+    "tipo_dato": "integer",
+    "longitud_maxima": null,
+    "precision_numerica": 32,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 6,
+    "columna": "sent_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "birthday_push_log",
+    "posicion": 7,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "posicion": 2,
+    "columna": "profile_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "posicion": 3,
+    "columna": "date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "posicion": 6,
+    "columna": "catechism",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance",
+    "posicion": 7,
+    "columna": "mass",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "posicion": 1,
+    "columna": "profile_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "posicion": 2,
+    "columna": "date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "posicion": 3,
+    "columna": "event_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "catechist_attendance_events",
+    "posicion": 4,
+    "columna": "status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "class_days",
+    "posicion": 1,
+    "columna": "date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 2,
+    "columna": "registration_form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 3,
+    "columna": "mobile_token_hash",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 4,
+    "columna": "desktop_token_hash",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 5,
+    "columna": "minor_without_dni",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 6,
+    "columna": "status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'pending'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 7,
+    "columna": "front_path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 8,
+    "columna": "back_path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 9,
+    "columna": "images_deleted_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 10,
+    "columna": "extracted",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 11,
+    "columna": "extraction_error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 12,
+    "columna": "attempts",
+    "tipo_dato": "integer",
+    "longitud_maxima": null,
+    "precision_numerica": 32,
+    "admite_null": "NO",
+    "valor_por_defecto": "0"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 13,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 14,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 15,
+    "columna": "expires_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "(now() + '00:30:00'::interval)"
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 16,
+    "columna": "confirmed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "dni_verification_sessions",
+    "posicion": 17,
+    "columna": "consumed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "bigint",
+    "longitud_maxima": null,
+    "precision_numerica": 64,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 2,
+    "columna": "user_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 3,
+    "columna": "google_sub",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 4,
+    "columna": "file_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 5,
+    "columna": "parent_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 6,
+    "columna": "root_folder_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 7,
+    "columna": "name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 8,
+    "columna": "name_normalized",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 9,
+    "columna": "mime_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 10,
+    "columna": "path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 11,
+    "columna": "path_ids",
+    "tipo_dato": "ARRAY",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'{}'::text[]"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 12,
+    "columna": "web_view_link",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 13,
+    "columna": "icon_link",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 14,
+    "columna": "thumbnail_link",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 15,
+    "columna": "size_bytes",
+    "tipo_dato": "bigint",
+    "longitud_maxima": null,
+    "precision_numerica": 64,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 16,
+    "columna": "modified_time",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 17,
+    "columna": "trashed",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 18,
+    "columna": "is_folder",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 19,
+    "columna": "owner_display_name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 20,
+    "columna": "owner_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 21,
+    "columna": "can_edit",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 22,
+    "columna": "can_rename",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 23,
+    "columna": "can_trash",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 24,
+    "columna": "can_download",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 25,
+    "columna": "can_add_children",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 26,
+    "columna": "drive_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 27,
+    "columna": "source_updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 28,
+    "columna": "indexed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 29,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_index_items",
+    "posicion": 30,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 1,
+    "columna": "user_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 2,
+    "columna": "google_sub",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 3,
+    "columna": "root_folder_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 4,
+    "columna": "start_page_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 5,
+    "columna": "last_processed_page_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 6,
+    "columna": "last_full_index_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 7,
+    "columna": "last_incremental_sync_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 8,
+    "columna": "sync_status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'idle'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 9,
+    "columna": "last_error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 10,
+    "columna": "webhook_channel_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 11,
+    "columna": "webhook_resource_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 12,
+    "columna": "webhook_expiration",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 13,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 14,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 15,
+    "columna": "pending_queue",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 16,
+    "columna": "visited_folder_ids",
+    "tipo_dato": "ARRAY",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'{}'::text[]"
+  },
+  {
+    "esquema": "public",
+    "tabla": "drive_sync_state",
+    "posicion": 17,
+    "columna": "indexed_count",
+    "tipo_dato": "integer",
+    "longitud_maxima": null,
+    "precision_numerica": 32,
+    "admite_null": "NO",
+    "valor_por_defecto": "0"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 1,
+    "columna": "user_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 2,
+    "columna": "google_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 3,
+    "columna": "google_sub",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 4,
+    "columna": "encrypted_access_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 5,
+    "columna": "encrypted_refresh_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 6,
+    "columna": "token_expiry",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 7,
+    "columna": "scope",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 8,
+    "columna": "connected_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 9,
+    "columna": "last_token_refresh_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 10,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_drive_connections",
+    "posicion": 11,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 2,
+    "columna": "google_form_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 3,
+    "columna": "registration_form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 4,
+    "columna": "event_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 5,
+    "columna": "pubsub_message_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 6,
+    "columna": "pubsub_publish_time",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 7,
+    "columna": "payload",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 8,
+    "columna": "received_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 9,
+    "columna": "processed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 10,
+    "columna": "processing_status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'pending'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_events",
+    "posicion": 11,
+    "columna": "error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 2,
+    "columna": "google_form_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 3,
+    "columna": "response_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 4,
+    "columna": "registration_form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 5,
+    "columna": "submitted_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 6,
+    "columna": "first_seen_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 7,
+    "columna": "processed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 8,
+    "columna": "processing_status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'pending'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 9,
+    "columna": "raw_response",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 10,
+    "columna": "error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 11,
+    "columna": "last_event_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 12,
+    "columna": "google_response_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 13,
+    "columna": "deletion_status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'not_requested'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 14,
+    "columna": "deletion_requested_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 15,
+    "columna": "deletion_attempted_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 16,
+    "columna": "deleted_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 17,
+    "columna": "deletion_error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_processed_responses",
+    "posicion": 18,
+    "columna": "processing_started_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 2,
+    "columna": "registration_form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 3,
+    "columna": "google_form_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 4,
+    "columna": "watch_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 5,
+    "columna": "event_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 6,
+    "columna": "topic_name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 7,
+    "columna": "expires_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 8,
+    "columna": "status",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'active'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 9,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 10,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 11,
+    "columna": "last_notification_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 12,
+    "columna": "last_sync_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_form_watches",
+    "posicion": 13,
+    "columna": "error",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 2,
+    "columna": "provider",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 3,
+    "columna": "google_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 4,
+    "columna": "access_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 5,
+    "columna": "refresh_token",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 6,
+    "columna": "scope",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 7,
+    "columna": "token_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 8,
+    "columna": "expiry_date",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 9,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "google_oauth_tokens",
+    "posicion": 10,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "posicion": 1,
+    "columna": "group_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "group_catechist",
+    "posicion": 2,
+    "columna": "profile_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "groups",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "groups",
+    "posicion": 2,
+    "columna": "name",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 1,
+    "columna": "incident_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 2,
+    "columna": "registration_date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "CURRENT_DATE"
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 3,
+    "columna": "incident_date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 4,
+    "columna": "student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 5,
+    "columna": "profile_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "incidents",
+    "posicion": 6,
+    "columna": "description",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "posicion": 1,
+    "columna": "student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "mass_services",
+    "posicion": 3,
+    "columna": "service_type",
+    "tipo_dato": "character varying",
+    "longitud_maxima": 1,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 2,
+    "columna": "scope",
+    "tipo_dato": "report_scope",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 3,
+    "columna": "scope_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 4,
+    "columna": "month",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 5,
+    "columna": "generated_by",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 6,
+    "columna": "generated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 7,
+    "columna": "report_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 8,
+    "columna": "payload",
+    "tipo_dato": "jsonb",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "monthly_reports",
+    "posicion": 9,
+    "columna": "source_hash",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 2,
+    "columna": "student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 3,
+    "columna": "public_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 4,
+    "columna": "email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 5,
+    "columna": "normalized_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 6,
+    "columna": "token_hash",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 7,
+    "columna": "expires_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 8,
+    "columna": "consumed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 9,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verification_tokens",
+    "posicion": 10,
+    "columna": "sent_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 2,
+    "columna": "email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 3,
+    "columna": "normalized_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 4,
+    "columna": "verified_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 5,
+    "columna": "last_student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 6,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parent_email_verifications",
+    "posicion": 7,
+    "columna": "updated_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parish_events",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "parish_events",
+    "posicion": 2,
+    "columna": "title",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "parish_events",
+    "posicion": 3,
+    "columna": "date",
+    "tipo_dato": "timestamp without time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 2,
+    "columna": "name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 3,
+    "columna": "role",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 6,
+    "columna": "email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 7,
+    "columna": "birth_date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "profiles",
+    "posicion": 8,
+    "columna": "photo_path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 2,
+    "columna": "registration_form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 3,
+    "columna": "email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 4,
+    "columna": "normalized_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 5,
+    "columna": "token_hash",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 6,
+    "columna": "expires_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 7,
+    "columna": "consumed_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 8,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 9,
+    "columna": "sent_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "public_form_email_verification_tokens",
+    "posicion": 10,
+    "columna": "dni_verification_session_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 2,
+    "columna": "user_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 3,
+    "columna": "endpoint",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 4,
+    "columna": "p256dh",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 5,
+    "columna": "auth",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 6,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "push_subscriptions",
+    "posicion": 7,
+    "columna": "last_used_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "posicion": 1,
+    "columna": "form_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "posicion": 2,
+    "columna": "group_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_form_groups",
+    "posicion": 3,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 2,
+    "columna": "title",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 3,
+    "columna": "description",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 4,
+    "columna": "url",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 5,
+    "columna": "active",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "true"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 6,
+    "columna": "open_date",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 7,
+    "columna": "close_date",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 8,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 9,
+    "columna": "access_type",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "'restricted'::text"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 10,
+    "columna": "prefill_name_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 11,
+    "columna": "prefill_parent_email_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 12,
+    "columna": "prefill_school_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 13,
+    "columna": "prefill_birth_date_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 14,
+    "columna": "prefill_group_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 15,
+    "columna": "prefill_dni_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 16,
+    "columna": "prefill_gender_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 17,
+    "columna": "prefill_public_id_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 18,
+    "columna": "google_form_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 19,
+    "columna": "google_form_watch_enabled",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 20,
+    "columna": "response_public_id_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 21,
+    "columna": "response_name_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 22,
+    "columna": "response_dni_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 23,
+    "columna": "response_gender_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 24,
+    "columna": "response_parent_email_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 25,
+    "columna": "response_school_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 26,
+    "columna": "response_birth_date_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 27,
+    "columna": "response_group_question_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 28,
+    "columna": "circular_url",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 29,
+    "columna": "authorization_url",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 30,
+    "columna": "dni_verification_enabled",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 31,
+    "columna": "prefill_address_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 32,
+    "columna": "prefill_postal_code_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 33,
+    "columna": "prefill_course_entry",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 34,
+    "columna": "prefill_preconfirmation_first_course_option",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 35,
+    "columna": "prefill_preconfirmation_second_course_option",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 36,
+    "columna": "prefill_confirmation_first_course_option",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 37,
+    "columna": "prefill_confirmation_second_course_option",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 38,
+    "columna": "prefill_underage",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 39,
+    "columna": "prefill_underage_enabled",
+    "tipo_dato": "boolean",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "false"
+  },
+  {
+    "esquema": "public",
+    "tabla": "registration_forms",
+    "posicion": 40,
+    "columna": "prefill_underage_reference_date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "school_names",
+    "posicion": 2,
+    "columna": "name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "posicion": 1,
+    "columna": "student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "posicion": 2,
+    "columna": "date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "posicion": 3,
+    "columna": "catechism",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_attendance",
+    "posicion": 4,
+    "columna": "mass",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "posicion": 1,
+    "columna": "student_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "posicion": 2,
+    "columna": "public_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "student_public_access",
+    "posicion": 3,
+    "columna": "created_at",
+    "tipo_dato": "timestamp with time zone",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "now()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": "gen_random_uuid()"
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 2,
+    "columna": "name",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 3,
+    "columna": "email",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 4,
+    "columna": "parent_email",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 5,
+    "columna": "school",
+    "tipo_dato": "character varying",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 6,
+    "columna": "birth_date",
+    "tipo_dato": "date",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 7,
+    "columna": "group_id",
+    "tipo_dato": "uuid",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "NO",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 8,
+    "columna": "photo_path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 9,
+    "columna": "dni",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students",
+    "posicion": 10,
+    "columna": "gender",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 1,
+    "columna": "id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 2,
+    "columna": "name",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 3,
+    "columna": "dni",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 4,
+    "columna": "gender",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 5,
+    "columna": "email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 6,
+    "columna": "parent_email",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 7,
+    "columna": "school",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 8,
+    "columna": "birth_date",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 9,
+    "columna": "group_id",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  },
+  {
+    "esquema": "public",
+    "tabla": "students_import_tmp",
+    "posicion": 10,
+    "columna": "photo_path",
+    "tipo_dato": "text",
+    "longitud_maxima": null,
+    "precision_numerica": null,
+    "admite_null": "YES",
+    "valor_por_defecto": null
+  }
+]
+
