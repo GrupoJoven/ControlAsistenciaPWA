@@ -8,6 +8,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 // --------------------
 type ReportType = "students" | "catechists";
 type Scope = "group" | "all_students" | "all_catechists";
+type Stage = "preconfirmation" | "confirmation";
+type ReportStage = Stage | "all";
 
 type ReqBody = {
   reportType: ReportType;
@@ -19,12 +21,43 @@ type MonthlyReportRow = {
   id: string;
   scope: Scope;
   scope_id: string | null;
+  stage: ReportStage;
   month: string;
   report_type: ReportType;
   generated_by: string;
   generated_at: string;
   payload: any;
 };
+
+const STAGE_LABELS: Record<ReportStage, string> = {
+  preconfirmation: "Preconfirmación",
+  confirmation: "Confirmación",
+  all: "Ambas etapas",
+};
+
+/**
+ * Etapas efectivas de un perfil: la de profiles.stage más las de sus grupos
+ * (misma regla que profile_stages() en la BD). Un coordinador global tiene
+ * las dos. Sirve para no contar como ausencia un evento de la otra etapa.
+ */
+function getProfileStages(
+  profile: { id: string; role: string; stage: string | null },
+  links: { profile_id: string; group_id: string }[],
+  groupStageById: Map<string, string | null>
+): Stage[] {
+  if (profile.role === "coordinator" && !profile.stage) return ["preconfirmation", "confirmation"];
+
+  const stages = new Set<Stage>();
+  if (profile.stage === "preconfirmation" || profile.stage === "confirmation") stages.add(profile.stage);
+
+  for (const link of links) {
+    if (link.profile_id !== profile.id) continue;
+    const stage = groupStageById.get(link.group_id);
+    if (stage === "preconfirmation" || stage === "confirmation") stages.add(stage);
+  }
+
+  return [...stages];
+}
 
 // --------------------
 // Helpers
@@ -236,7 +269,7 @@ serve(async (req) => {
   // Carga rol del usuario
   const { data: prof, error: profErr } = await admin
     .from("profiles")
-    .select("id, role, name")
+    .select("id, role, stage, name")
     .eq("id", userId)
     .maybeSingle();
 
@@ -246,10 +279,21 @@ serve(async (req) => {
   const isCoordinator = role === "coordinator";
   const isCatechist = role === "catechist";
 
+  // Coordinador de etapa: profiles.stage no nulo. Sus informes "todos los
+  // niños / equipo" son solo de su etapa y se guardan con esa stage. Los de
+  // grupo llevan 'all' porque el grupo ya es de una etapa concreta. Tiene que
+  // coincidir con lo que consulta Reports.tsx.
+  const callerStage: Stage | null =
+    isCoordinator && (prof.stage === "preconfirmation" || prof.stage === "confirmation")
+      ? prof.stage
+      : null;
+  const reportStage: ReportStage = scope === "group" ? "all" : (callerStage ?? "all");
+
   // Permisos por scope:
   // - catechists report: solo coordinator (scope all_catechists)
   // - all_students: solo coordinator
-  // - group: coordinator siempre; catechist solo si está vinculado en group_catechist
+  // - group: coordinator si el grupo es de su etapa (el global, cualquiera);
+  //   catechist solo si está vinculado en group_catechist
   if (reportType === "catechists") {
     if (!isCoordinator || scope !== "all_catechists") {
       return forbidden("Solo el coordinador puede generar/ver el informe del equipo.");
@@ -274,6 +318,18 @@ serve(async (req) => {
     if (linkErr || !link) return forbidden("No tienes permiso para generar/ver informes de ese grupo.");
   }
 
+  if (scope === "group" && isCoordinator && callerStage) {
+    const { data: grp, error: grpErr } = await admin
+      .from("groups")
+      .select("id, stage")
+      .eq("id", scopeId!)
+      .maybeSingle();
+
+    if (grpErr || !grp || grp.stage !== callerStage) {
+      return forbidden("Ese grupo no es de tu etapa.");
+    }
+  }
+
   // Month lock
   const month = getMonthMadridISO(new Date());
 
@@ -283,6 +339,7 @@ serve(async (req) => {
     .select("*")
     .eq("month", month)
     .eq("scope", scope)
+    .eq("stage", reportStage)
     .eq("report_type", reportType);
 
   if (scope === "group") existingQ = existingQ.eq("scope_id", scopeId);
@@ -313,12 +370,14 @@ serve(async (req) => {
   let payload: any = null;
 
   if (reportType === "students") {
-    // Determinar alumnos target
+    // Determinar alumnos target. Para un coordinador de etapa, "todos" son
+    // los de los grupos de su etapa (groups.stage sale del nombre del grupo).
     let studQuery = admin
       .from("students")
-      .select("id, name, school, group_id");
+      .select("id, name, school, group_id, groups!inner(stage)");
 
     if (scope === "group") studQuery = studQuery.eq("group_id", scopeId!);
+    else if (callerStage) studQuery = studQuery.eq("groups.stage", callerStage);
 
     const { data: studs, error: studsErr } = await studQuery;
     if (studsErr) return serverError("Error cargando alumnos.", { detail: studsErr.message });
@@ -379,7 +438,9 @@ serve(async (req) => {
 
       const scopeTitle =
         scope === "all_students"
-          ? "Todos los niños (parroquia)"
+          ? callerStage
+            ? `Todos los niños de ${STAGE_LABELS[callerStage]}`
+            : "Todos los niños (parroquia)"
           : "Grupo específico";
 
       const userText = clampText(
@@ -425,16 +486,41 @@ serve(async (req) => {
     }
   } else {
     // reportType === "catechists" (solo coordinator y scope all_catechists)
-    // Cargar catequistas
-    const { data: cats, error: catsErr } = await admin
+    // Cargar catequistas con sus etapas (grupos + profiles.stage). Para un
+    // coordinador de etapa solo entran los de la suya.
+    const { data: allCats, error: catsErr } = await admin
       .from("profiles")
-      .select("id, name, role")
+      .select("id, name, role, stage")
       .eq("role", "catechist")
       .order("name", { ascending: true });
 
     if (catsErr) return serverError("Error cargando catequistas.", { detail: catsErr.message });
 
-    // class days y events del curso
+    const { data: groupRows, error: groupsErr } = await admin.from("groups").select("id, stage");
+    if (groupsErr) return serverError("Error cargando grupos.", { detail: groupsErr.message });
+
+    const { data: linkRows, error: linksErr } = await admin
+      .from("group_catechist")
+      .select("profile_id, group_id");
+    if (linksErr) return serverError("Error cargando group_catechist.", { detail: linksErr.message });
+
+    const groupStageById = new Map<string, string | null>(
+      (groupRows ?? []).map((g: any) => [String(g.id), g.stage ?? null])
+    );
+    const links = (linkRows ?? []) as { profile_id: string; group_id: string }[];
+
+    const stagesById = new Map<string, Stage[]>();
+    for (const c of allCats ?? []) {
+      stagesById.set(String(c.id), getProfileStages(c as any, links, groupStageById));
+    }
+
+    const cats = (allCats ?? []).filter(
+      (c: any) => !callerStage || (stagesById.get(String(c.id)) ?? []).includes(callerStage)
+    );
+
+    // class days y events del curso. De los eventos, un coordinador de etapa
+    // solo ve los suyos y los de 'all'; y a cada catequista solo se le exigen
+    // los de sus etapas.
     const { data: classDays, error: cdErr } = await admin
       .from("class_days")
       .select("date")
@@ -443,32 +529,57 @@ serve(async (req) => {
 
     if (cdErr) return serverError("Error cargando class_days.", { detail: cdErr.message });
 
-    const { data: evs, error: evErr } = await admin
+    let evQuery = admin
       .from("parish_events")
-      .select("id, title, date")
+      .select("id, title, date, stage")
       .gte("date", start)
       .lte("date", todayISO);
+
+    if (callerStage) evQuery = evQuery.in("stage", ["all", callerStage]);
+
+    const { data: evs, error: evErr } = await evQuery;
 
     if (evErr) return serverError("Error cargando parish_events.", { detail: evErr.message });
 
     const nClass = (classDays ?? []).length;
     const nEvents = (evs ?? []).length;
 
-    // attendance catequistas
+    const eventsForStages = (stages: Stage[]) =>
+      (evs ?? []).filter((e: any) => e.stage === "all" || stages.includes(e.stage));
+
+    // attendance catequistas: días lectivos (catechist_attendance) y eventos
+    // (catechist_attendance_events) van en tablas distintas.
     const catechistIds = (cats ?? []).map((c: any) => c.id);
+
     const { data: ca, error: caErr } = await admin
       .from("catechist_attendance")
-      .select("profile_id, date, type, ref_id, catechism, mass, status")
+      .select("profile_id, date, catechism, mass")
       .in("profile_id", catechistIds)
       .gte("date", start)
       .lte("date", todayISO);
 
     if (caErr) return serverError("Error cargando catechist_attendance.", { detail: caErr.message });
 
+    const { data: cae, error: caeErr } = await admin
+      .from("catechist_attendance_events")
+      .select("profile_id, event_id, status")
+      .in("profile_id", catechistIds)
+      .gte("date", start)
+      .lte("date", todayISO);
+
+    if (caeErr) return serverError("Error cargando catechist_attendance_events.", { detail: caeErr.message });
+
     // Agregación simple: contamos asistencias "present"/"late" como asistencia.
-    const byP = new Map<string, { classAttend: number; classPossible: number; eventAttend: number; eventPossible: number }>();
+    const byP = new Map<string, { classAttend: number; classPossible: number; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
     for (const pid of catechistIds) {
-      byP.set(pid, { classAttend: 0, classPossible: nClass * 2, eventAttend: 0, eventPossible: nEvents });
+      const applicable = eventsForStages(stagesById.get(String(pid)) ?? []);
+      byP.set(pid, {
+        classAttend: 0,
+        classPossible: nClass * 2,
+        eventAttend: 0,
+        eventPossible: applicable.length,
+        eventIds: new Set(applicable.map((e: any) => String(e.id))),
+      });
     }
 
     // contamos registros reales (si faltan registros, se consideran ausencias implícitas por el posible total)
@@ -477,16 +588,22 @@ serve(async (req) => {
       const obj = byP.get(pid);
       if (!obj) continue;
 
-      if ((r as any).type === "class") {
-        // catechism + mass pueden estar presentes/late/absent
-        const c = (r as any).catechism;
-        const m = (r as any).mass;
-        if (c === "present" || c === "late") obj.classAttend += 1;
-        if (m === "present" || m === "late") obj.classAttend += 1;
-      } else if ((r as any).type === "event") {
-        const st = (r as any).status;
-        if (st === "present" || st === "late") obj.eventAttend += 1;
-      }
+      // catechism + mass pueden estar presentes/late/absent
+      const c = (r as any).catechism;
+      const m = (r as any).mass;
+      if (c === "present" || c === "late") obj.classAttend += 1;
+      if (m === "present" || m === "late") obj.classAttend += 1;
+    }
+
+    for (const r of cae ?? []) {
+      const pid = String((r as any).profile_id);
+      const obj = byP.get(pid);
+      if (!obj) continue;
+      // Un evento de la otra etapa no cuenta ni a favor ni en contra.
+      if (!obj.eventIds.has(String((r as any).event_id))) continue;
+
+      const st = (r as any).status;
+      if (st === "present" || st === "late") obj.eventAttend += 1;
     }
 
     const rows = (cats ?? []).map((c: any) => {
@@ -508,10 +625,10 @@ serve(async (req) => {
 
     const userText = clampText(
       [
-        `ÁMBITO: Equipo de catequistas`,
+        `ÁMBITO: Equipo de catequistas${callerStage ? ` de ${STAGE_LABELS[callerStage]}` : ""}`,
         `PERIODO: ${start} a ${todayISO}`,
         `DÍAS LECTIVOS: ${nClass} (cada uno cuenta catequesis+misa)`,
-        `EVENTOS: ${nEvents}`,
+        `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los de su etapa)`,
         ``,
         `PARTICIPACIÓN MÁS BAJA:`,
         ...low.map((r) => `- ${r.name}: ${r.rate}% (asistencias=${r.attended}/${r.possible})`),
@@ -547,6 +664,7 @@ serve(async (req) => {
   const insertRow = {
     scope,
     scope_id: scope === "group" ? scopeId : null,
+    stage: reportStage,
     month,
     report_type: reportType,
     generated_by: userId,

@@ -39,6 +39,7 @@ import {
   X
 } from 'lucide-react';
 import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, AttendanceStatus, CatechistAttendanceRecord } from './types';
+import { EventStage, Stage, getUserStages, isGlobalCoordinator } from './src/utils/stages';
 import Dashboard from './components/Dashboard';
 import AttendanceTracker from './components/AttendanceTracker';
 import Historial from './components/Historial';
@@ -153,7 +154,7 @@ const App: React.FC = () => {
       try {
         const { data: profile, error } = await supabase
           .from("profiles")
-          .select("id, name, role, birth_date, photo_path")
+          .select("id, name, role, stage, birth_date, photo_path")
           .eq("id", sessionUser.id)
           .single();
 
@@ -166,6 +167,7 @@ const App: React.FC = () => {
           name: profile.name ?? "",
           email: sessionUser.email ?? "",
           role: profile.role,
+          stage: (profile.stage as Stage | null) ?? null,
           birthDate: profile.birth_date ? String(profile.birth_date) : "",
           photo: await signMediaUrl(profile.photo_path),
         };
@@ -347,10 +349,10 @@ const App: React.FC = () => {
   
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, name, role, birth_date, photo_path")
+      .select("id, name, role, stage, birth_date, photo_path")
       .eq("id", userId)
       .single();
-  
+
     if (profileError) {
       alert(
         "Login correcto, pero no se pudo cargar el perfil: " +
@@ -358,12 +360,13 @@ const App: React.FC = () => {
       );
       return;
     }
-  
+
     const appUser: User = {
       id: profile.id,
       name: profile.name ?? "",
       email: data.user?.email ?? email,
       role: profile.role,
+      stage: (profile.stage as Stage | null) ?? null,
       birthDate: profile.birth_date ? String(profile.birth_date) : "",
       photo: await signMediaUrl(profile.photo_path),
     };
@@ -1080,11 +1083,13 @@ const App: React.FC = () => {
 
   const updateGroup = async (updatedGroup: Group) => {
     if (blockIfOffline("actualizar el grupo")) return;
+    // stage es una columna generada a partir del nombre: se relee por si el
+    // cambio de nombre la ha movido de etapa.
     const { data, error } = await supabase
       .from("groups")
       .update({ name: updatedGroup.name })
       .eq("id", updatedGroup.id)
-      .select("id, name")
+      .select("id, name, stage")
       .single();
 
     if (error) {
@@ -1092,7 +1097,11 @@ const App: React.FC = () => {
       return;
     }
 
-    setGroups(prev => prev.map(g => (g.id === data.id ? { ...g, name: data.name } : g)));
+    setGroups(prev =>
+      prev.map(g =>
+        g.id === data.id ? { ...g, name: data.name, stage: (data.stage as Stage | null) ?? null } : g
+      )
+    );
   };
 
   const addGroup = async (name: string) => {
@@ -1100,7 +1109,7 @@ const App: React.FC = () => {
     const { data, error } = await supabase
       .from("groups")
       .insert({ name })
-      .select("id, name")
+      .select("id, name, stage")
       .single();
 
     if (error) {
@@ -1108,7 +1117,10 @@ const App: React.FC = () => {
       return;
     }
 
-    setGroups(prev => [...prev, { id: data.id, name: data.name, catechistIds: [] }]);
+    setGroups(prev => [
+      ...prev,
+      { id: data.id, name: data.name, stage: (data.stage as Stage | null) ?? null, catechistIds: [] },
+    ]);
   };
 
 
@@ -1176,13 +1188,38 @@ const App: React.FC = () => {
     [groups, groupCatechistLinks]
   );
 
+  // --- Etapas -----------------------------------------------------------------
+  // Las etapas efectivas de cada usuario salen de sus grupos (y de
+  // profiles.stage), así que se recalculan aquí cada vez que cambian los
+  // vínculos en vez de guardarse en el estado: setUserGroups actualiza los
+  // vínculos en local sin recargar los perfiles.
+  const withStages = (list: User[]): User[] =>
+    list.map((u) => ({ ...u, stages: getUserStages(u, groups, groupCatechistLinks) }));
 
-  const addEvent = async (event: { title: string; date: string }) => {
+  const usersWithStages = useMemo(
+    () => withStages(users),
+    [users, groups, groupCatechistLinks]
+  );
+
+  const incidentUsersWithStages = useMemo(
+    () => withStages(incidentUsers),
+    [incidentUsers, groups, groupCatechistLinks]
+  );
+
+  const currentUserWithStages = useMemo<User | null>(
+    () => (currentUser ? withStages([currentUser])[0] : null),
+    [currentUser, groups, groupCatechistLinks]
+  );
+
+  const isGlobal = isGlobalCoordinator(currentUser);
+
+
+  const addEvent = async (event: { title: string; date: string; stage: EventStage }) => {
   if (blockIfOffline("añadir evento a la agenda")) return;
     const { data, error } = await supabase
       .from("parish_events")
-      .insert({ title: event.title, date: event.date })
-      .select("id, title, date")
+      .insert({ title: event.title, date: event.date, stage: event.stage })
+      .select("id, title, date, stage")
       .single();
 
     if (error) {
@@ -1190,10 +1227,11 @@ const App: React.FC = () => {
       return;
     }
 
-    const createdEvent = {
+    const createdEvent: ParishEvent = {
       id: data.id,
       title: data.title,
       date: String(data.date),
+      stage: (data.stage as EventStage) ?? event.stage,
     };
 
     setEvents(prev =>
@@ -1211,11 +1249,14 @@ const App: React.FC = () => {
         minute: "2-digit",
       });
 
+      // Solo se avisa a la gente de la etapa del evento (y a los coordinadores
+      // globales). La edge function resuelve los destinatarios en el servidor.
       const res = await supabase.functions.invoke("send-push-notifications", {
         body: {
           title: "Nuevo evento en la agenda",
           body: `${createdEvent.title} · ${formattedDateTime}`,
           url: "/",
+          stage: createdEvent.stage,
         },
       });
 
@@ -1259,7 +1300,7 @@ const App: React.FC = () => {
 
     const { data: removedEvent, error: fetchError } = await supabase
       .from("parish_events")
-      .select("title, date")
+      .select("title, date, stage")
       .eq("id", id)
       .single();
 
@@ -1302,6 +1343,7 @@ const App: React.FC = () => {
           title: "Evento eliminado de la agenda",
           body: `${removedEvent.title} · ${formattedDateTime}`,
           url: "/",
+          stage: (removedEvent.stage as EventStage | null) ?? "all",
         },
       });
 
@@ -1424,8 +1466,8 @@ const App: React.FC = () => {
 
 
   const filteredUsers = useMemo(
-    () => getFilteredUsers(users, searchQuery),
-    [users, searchQuery]
+    () => getFilteredUsers(usersWithStages, searchQuery),
+    [usersWithStages, searchQuery]
   );
 
 
@@ -1530,7 +1572,7 @@ const App: React.FC = () => {
         />
       )}
       <AppSidebar
-        currentUser={currentUser}
+        currentUser={currentUserWithStages ?? currentUser}
         currentView={currentView}
         isSidebarOpen={isSidebarOpen}
         onCloseSidebar={() => setIsSidebarOpen(false)}
@@ -1687,10 +1729,10 @@ const App: React.FC = () => {
 
           {currentView === 'incidents' && (
             <IncidentsManager
-              currentUser={currentUser}
+              currentUser={currentUserWithStages ?? currentUser}
               groups={groups}
               students={students}
-              users={incidentUsers}
+              users={incidentUsersWithStages}
               activeGroupId={activeGroupId}
               groupCatechistLinks={groupCatechistLinks}
               isOnline={isOnline}
@@ -1745,7 +1787,7 @@ const App: React.FC = () => {
 
           {currentView === 'catechists' && currentUser.role === 'coordinator' && (
             <CatechistManager
-              users={users}
+              users={usersWithStages}
               filteredUsers={filteredUsers}
               onAddUser={(u) => addUser(u)}
               onRemoveUser={(id) => { void removeUser(id); }}
@@ -1761,15 +1803,17 @@ const App: React.FC = () => {
             />
           )}
 
-          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={users.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={academicYearEvents} classDays={academicYearClassDays} onUpdate={updateCatechistAttendance} />}
+          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={usersWithStages.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={academicYearEvents} classDays={academicYearClassDays} onUpdate={updateCatechistAttendance} />}
           {currentView === 'coordinator-edit-groups' && (
             <GroupManager
               groups={groupsWithCatechists}
               students={students}
-              users={users}
+              users={usersWithStages}
               classDays={classDays}
               isOnline={isOnline}
               lastPromotionAt={lastPromotionAt}
+              canPromote={isGlobal}
+              importStage={currentUser.stage ?? null}
               onUpdateGroup={(g) => void updateGroup(g)}
               onUpdateStudent={(s) => void updateStudent(s)}
               onAssignCatechist={(uid, gid, assign) => void setCatechistInGroup(uid, gid, assign)}
@@ -1787,6 +1831,7 @@ const App: React.FC = () => {
           )}
           {currentView === 'agenda' && currentUser.role === 'coordinator' && (
             <AgendaManager
+              currentUser={currentUser}
               events={events}
               onAdd={(e) => void addEvent(e)}
               onRemove={(id) => void removeEvent(id)}
@@ -1795,10 +1840,10 @@ const App: React.FC = () => {
           {currentView === 'reports' && (
             <Reports
               students={students}
-              currentUser={currentUser}
+              currentUser={currentUserWithStages ?? currentUser}
               groups={groups}
               classDays={classDays}
-              users={users}
+              users={usersWithStages}
               events={events}
               academicYear={selectedAcademicYear}
               activeGroupId={activeGroupId}
@@ -1813,7 +1858,7 @@ const App: React.FC = () => {
           )}
           {currentView === 'my-account' && (
             <MyAccount
-              user={currentUser}
+              user={currentUserWithStages ?? currentUser}
               groups={groups}
               activeGroupId={activeGroupId}
               isOnline={isOnline}

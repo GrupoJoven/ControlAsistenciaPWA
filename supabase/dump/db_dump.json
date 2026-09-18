@@ -1,0 +1,2530 @@
+[
+  {
+    "kind": "enum",
+    "name": "report_scope",
+    "data": {
+      "values": [
+        "group",
+        "all_students",
+        "all_catechists"
+      ]
+    }
+  },
+  {
+    "kind": "function",
+    "name": "can_access_student",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.can_access_student(_student_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE\nAS $function$\r\n  select\r\n    public.is_coordinator()\r\n    or exists (\r\n      select 1\r\n      from public.students s\r\n      join public.group_catechist gc\r\n        on gc.group_id = s.group_id\r\n      where s.id = _student_id\r\n        and gc.profile_id = auth.uid()\r\n    );\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "claim_pending_google_form_processed_responses",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.claim_pending_google_form_processed_responses(p_limit integer DEFAULT 20)\n RETURNS SETOF google_form_processed_responses\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  return query\r\n  with picked as (\r\n    select id\r\n    from public.google_form_processed_responses\r\n    where processing_status = 'pending'\r\n    order by first_seen_at asc\r\n    limit p_limit\r\n    for update skip locked\r\n  ),\r\n  updated as (\r\n    update public.google_form_processed_responses g\r\n    set\r\n      processing_status = 'processing',\r\n      processing_started_at = now(),\r\n      error = null\r\n    where g.id in (select id from picked)\r\n    returning g.*\r\n  )\r\n  select * from updated;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "cleanup_dni_verification_sessions",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.cleanup_dni_verification_sessions()\n RETURNS TABLE(orphan_path text)\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\nbegin\r\n  return query\r\n  with borradas as (\r\n    delete from public.dni_verification_sessions\r\n    where expires_at < now()\r\n    returning front_path, back_path\r\n  )\r\n  select p.path\r\n  from borradas b\r\n  cross join lateral (values (b.front_path), (b.back_path)) as p(path)\r\n  where p.path is not null;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "cleanup_expired_parent_email_verification_tokens",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.cleanup_expired_parent_email_verification_tokens()\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  delete from public.parent_email_verification_tokens\r\n  where expires_at < now();\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "create_group_with_students",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.create_group_with_students(p_name text, p_catechist_ids uuid[], p_students jsonb)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\nDECLARE\r\n  v_role          text;\r\n  v_name          text;\r\n  v_group_id      uuid;\r\n  v_count         int;\r\n  v_dupes         text[];\r\n  v_bad_catechist int;\r\nBEGIN\r\n  -- --------------------------------------------------------------- permisos\r\n  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();\r\n\r\n  IF v_role IS DISTINCT FROM 'coordinator' THEN\r\n    RAISE EXCEPTION 'Solo un coordinador puede crear grupos.'\r\n      USING ERRCODE = 'insufficient_privilege';\r\n  END IF;\r\n\r\n  -- ----------------------------------------------------- nombre del grupo\r\n  v_name := btrim(coalesce(p_name, ''));\r\n\r\n  IF v_name = '' THEN\r\n    RAISE EXCEPTION 'El nombre del grupo es obligatorio.'\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  IF NOT (\r\n       v_name LIKE '1º PRECONFIRMACIÓN%'\r\n    OR v_name LIKE '2º PRECONFIRMACIÓN%'\r\n    OR v_name LIKE '1º CONFIRMACIÓN%'\r\n    OR v_name LIKE '2º CONFIRMACIÓN%'\r\n  ) THEN\r\n    RAISE EXCEPTION 'El nombre debe empezar por \"1º PRECONFIRMACIÓN\", \"2º PRECONFIRMACIÓN\", \"1º CONFIRMACIÓN\" o \"2º CONFIRMACIÓN\". Recibido: \"%\".', v_name\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  -- Comparación sin distinguir mayúsculas para no acabar con \"(A)\" y \"(a)\".\r\n  IF EXISTS (SELECT 1 FROM public.groups WHERE upper(btrim(name)) = upper(v_name)) THEN\r\n    RAISE EXCEPTION 'Ya existe un grupo llamado \"%\".', v_name\r\n      USING ERRCODE = 'unique_violation';\r\n  END IF;\r\n\r\n  -- ------------------------------------------------------------- alumnos\r\n  SELECT count(*) INTO v_count FROM jsonb_array_elements(coalesce(p_students, '[]'::jsonb));\r\n\r\n  IF v_count = 0 THEN\r\n    RAISE EXCEPTION 'El fichero no contiene ningún alumno.'\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  -- DNIs repetidos dentro del propio fichero.\r\n  SELECT array_agg(dni) INTO v_dupes\r\n  FROM (\r\n    SELECT s->>'dni' AS dni\r\n    FROM jsonb_array_elements(p_students) s\r\n    WHERE nullif(btrim(coalesce(s->>'dni', '')), '') IS NOT NULL\r\n    GROUP BY s->>'dni'\r\n    HAVING count(*) > 1\r\n  ) d;\r\n\r\n  IF v_dupes IS NOT NULL THEN\r\n    RAISE EXCEPTION 'El fichero tiene DNIs repetidos: %.', array_to_string(v_dupes, ', ')\r\n      USING ERRCODE = 'unique_violation';\r\n  END IF;\r\n\r\n  -- DNIs con letra de control incorrecta. El CHECK students_dni_valid ya lo\r\n  -- impediría, pero abortaría con un mensaje genérico sin decir cuáles fallan.\r\n  SELECT array_agg(dni) INTO v_dupes\r\n  FROM (\r\n    SELECT btrim(s->>'dni') AS dni\r\n    FROM jsonb_array_elements(p_students) s\r\n    WHERE nullif(btrim(coalesce(s->>'dni', '')), '') IS NOT NULL\r\n      AND NOT public.is_valid_spanish_dni_nie(btrim(s->>'dni'))\r\n  ) d;\r\n\r\n  IF v_dupes IS NOT NULL THEN\r\n    RAISE EXCEPTION 'Estos DNI/NIE no son válidos: %. No se ha importado nada.', array_to_string(v_dupes, ', ')\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  -- DNIs que ya existen en la base de datos. Se aborta todo, no se importa a medias.\r\n  SELECT array_agg(DISTINCT st.dni) INTO v_dupes\r\n  FROM public.students st\r\n  WHERE st.dni IS NOT NULL\r\n    AND st.dni IN (\r\n      SELECT btrim(s->>'dni')\r\n      FROM jsonb_array_elements(p_students) s\r\n      WHERE nullif(btrim(coalesce(s->>'dni', '')), '') IS NOT NULL\r\n    );\r\n\r\n  IF v_dupes IS NOT NULL THEN\r\n    RAISE EXCEPTION 'Estos DNI ya existen en la base de datos: %. No se ha importado nada.', array_to_string(v_dupes, ', ')\r\n      USING ERRCODE = 'unique_violation';\r\n  END IF;\r\n\r\n  -- --------------------------------------------------------- catequistas\r\n  IF p_catechist_ids IS NULL OR array_length(p_catechist_ids, 1) IS NULL THEN\r\n    RAISE EXCEPTION 'Debes asignar al menos un catequista al grupo.'\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  SELECT count(*) INTO v_bad_catechist\r\n  FROM unnest(p_catechist_ids) AS cid\r\n  WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = cid);\r\n\r\n  IF v_bad_catechist > 0 THEN\r\n    RAISE EXCEPTION 'Alguno de los catequistas seleccionados no existe.'\r\n      USING ERRCODE = 'foreign_key_violation';\r\n  END IF;\r\n\r\n  -- ------------------------------------------------------------- creación\r\n  INSERT INTO public.groups (name) VALUES (v_name) RETURNING id INTO v_group_id;\r\n\r\n  INSERT INTO public.group_catechist (group_id, profile_id)\r\n  SELECT v_group_id, cid FROM unnest(p_catechist_ids) AS cid;\r\n\r\n  INSERT INTO public.students (name, dni, gender, email, parent_email, school, birth_date, group_id)\r\n  SELECT\r\n    btrim(s->>'name'),\r\n    nullif(btrim(coalesce(s->>'dni', '')), ''),\r\n    nullif(btrim(coalesce(s->>'gender', '')), ''),\r\n    nullif(btrim(coalesce(s->>'email', '')), ''),\r\n    nullif(btrim(coalesce(s->>'parent_email', '')), ''),\r\n    nullif(btrim(coalesce(s->>'school', '')), ''),\r\n    nullif(btrim(coalesce(s->>'birth_date', '')), '')::date,\r\n    v_group_id\r\n  FROM jsonb_array_elements(p_students) s;\r\n\r\n  GET DIAGNOSTICS v_count = ROW_COUNT;\r\n\r\n  RETURN jsonb_build_object(\r\n    'ok', true,\r\n    'group_id', v_group_id,\r\n    'group_name', v_name,\r\n    'alumnos_creados', v_count,\r\n    'catequistas_asignados', array_length(p_catechist_ids, 1)\r\n  );\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "create_student_public_access",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.create_student_public_access()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nbegin\r\n  insert into public.student_public_access (student_id, public_id)\r\n  values (\r\n    new.id,\r\n    public.generate_unique_student_public_id()\r\n  )\r\n  on conflict (student_id) do nothing;\r\n\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "enqueue_birthday_pushes_if_madrid_9am",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.enqueue_birthday_pushes_if_madrid_9am()\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\ndeclare\r\n  madrid_now timestamp;\r\nbegin\r\n  madrid_now := now() at time zone 'Europe/Madrid';\r\n\r\n  -- Solo dispara si en Madrid son las 09:xx\r\n  if extract(hour from madrid_now)::int <> 9 then\r\n    return;\r\n  end if;\r\n\r\n  perform net.http_post(\r\n    url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url')\r\n      || '/functions/v1/send-birthday-pushes',\r\n    headers := jsonb_build_object(\r\n      'Content-Type', 'application/json',\r\n      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'birthday_cron_secret')\r\n    ),\r\n    body := '{}'::jsonb,\r\n    timeout_milliseconds := 10000\r\n  );\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "enqueue_birthday_pushes_now",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.enqueue_birthday_pushes_now()\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  perform net.http_post(\r\n    url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url')\r\n      || '/functions/v1/send-birthday-pushes',\r\n    headers := jsonb_build_object(\r\n      'Content-Type', 'application/json',\r\n      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'birthday_cron_secret')\r\n    ),\r\n    body := '{}'::jsonb,\r\n    timeout_milliseconds := 10000\r\n  );\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "force_uppercase_column",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.force_uppercase_column()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nDECLARE\r\n  col text := TG_ARGV[0];   -- nombre de columna pasado por el trigger\r\n  j   jsonb;\r\n  v   text;\r\nBEGIN\r\n  -- Convertimos NEW a jsonb para poder acceder a la columna por nombre\r\n  j := to_jsonb(NEW);\r\n  v := j ->> col;\r\n\r\n  IF v IS NOT NULL THEN\r\n    -- Sobreescribimos la clave 'col' con su versión en mayúsculas\r\n    j := jsonb_set(j, ARRAY[col], to_jsonb(UPPER(v)), false);\r\n    -- Volvemos a convertir a record del tipo de la fila\r\n    NEW := jsonb_populate_record(NEW, j);\r\n  END IF;\r\n\r\n  RETURN NEW;\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "generate_student_public_id",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.generate_student_public_id()\n RETURNS text\n LANGUAGE plpgsql\nAS $function$\r\ndeclare\r\n  chars text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\r\n  part1 text := '';\r\n  part2 text := '';\r\n  i int;\r\n  candidate text;\r\nbegin\r\n  for i in 1..4 loop\r\n    part1 := part1 || substr(chars, floor(random() * length(chars) + 1)::int, 1);\r\n  end loop;\r\n\r\n  for i in 1..3 loop\r\n    part2 := part2 || substr(chars, floor(random() * length(chars) + 1)::int, 1);\r\n  end loop;\r\n\r\n  candidate := 'SANP-' || part1 || '-' || part2;\r\n\r\n  return candidate;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "generate_unique_student_public_id",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.generate_unique_student_public_id()\n RETURNS text\n LANGUAGE plpgsql\nAS $function$\r\ndeclare\r\n  chars text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\r\n  part1 text;\r\n  part2 text;\r\n  candidate text;\r\n  exists_already boolean;\r\nbegin\r\n  loop\r\n    part1 := '';\r\n    part2 := '';\r\n\r\n    for i in 1..4 loop\r\n      part1 := part1 || substr(chars, floor(random() * length(chars) + 1)::int, 1);\r\n    end loop;\r\n\r\n    for i in 1..3 loop\r\n      part2 := part2 || substr(chars, floor(random() * length(chars) + 1)::int, 1);\r\n    end loop;\r\n\r\n    candidate := 'SANP-' || part1 || '-' || part2;\r\n\r\n    select exists(\r\n      select 1\r\n      from public.student_public_access\r\n      where public_id = candidate\r\n    )\r\n    into exists_already;\r\n\r\n    if not exists_already then\r\n      return candidate;\r\n    end if;\r\n  end loop;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "get_birthday_push_targets",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.get_birthday_push_targets(p_day date DEFAULT NULL::date)\n RETURNS TABLE(notification_day date, recipient_id uuid, recipient_role text, notification_kind text, priority integer, birthday_count integer)\n LANGUAGE sql\n STABLE\nAS $function$\r\n  with day_ref as (\r\n    select coalesce(p_day, (now() at time zone 'Europe/Madrid')::date) as d\r\n  ),\r\n\r\n  recipients as (\r\n    select\r\n      p.id as recipient_id,\r\n      p.role as recipient_role\r\n    from public.profiles p\r\n    where p.role in ('catechist', 'coordinator')\r\n  ),\r\n\r\n  recipient_groups as (\r\n    select distinct\r\n      gc.profile_id as recipient_id,\r\n      gc.group_id\r\n    from public.group_catechist gc\r\n    join recipients r\r\n      on r.recipient_id = gc.profile_id\r\n  ),\r\n\r\n  today_students as (\r\n    select\r\n      s.id as student_id,\r\n      s.group_id\r\n    from public.students s\r\n    cross join day_ref d\r\n    where s.birth_date is not null\r\n      and public.is_birthday_on_day(s.birth_date::date, d.d)\r\n  ),\r\n\r\n  today_team as (\r\n    select\r\n      p.id as profile_id\r\n    from public.profiles p\r\n    cross join day_ref d\r\n    where p.role in ('catechist', 'coordinator')\r\n      and p.birth_date is not null\r\n      and public.is_birthday_on_day(p.birth_date::date, d.d)\r\n  ),\r\n\r\n  catechist_student_counts as (\r\n    select\r\n      r.recipient_id,\r\n      r.recipient_role,\r\n      'student_birthdays_my_groups'::text as notification_kind,\r\n      1 as priority,\r\n      count(distinct ts.student_id)::int as birthday_count\r\n    from recipients r\r\n    join recipient_groups rg\r\n      on rg.recipient_id = r.recipient_id\r\n    join today_students ts\r\n      on ts.group_id = rg.group_id\r\n    where r.recipient_role = 'catechist'\r\n    group by r.recipient_id, r.recipient_role\r\n  ),\r\n\r\n  coordinator_my_group_counts as (\r\n    select\r\n      r.recipient_id,\r\n      r.recipient_role,\r\n      'student_birthdays_my_groups'::text as notification_kind,\r\n      1 as priority,\r\n      count(distinct ts.student_id)::int as birthday_count\r\n    from recipients r\r\n    join recipient_groups rg\r\n      on rg.recipient_id = r.recipient_id\r\n    join today_students ts\r\n      on ts.group_id = rg.group_id\r\n    where r.recipient_role = 'coordinator'\r\n    group by r.recipient_id, r.recipient_role\r\n  ),\r\n\r\n  coordinator_other_group_counts as (\r\n    select\r\n      r.recipient_id,\r\n      r.recipient_role,\r\n      'student_birthdays_other_groups'::text as notification_kind,\r\n      2 as priority,\r\n      count(distinct ts.student_id)::int as birthday_count\r\n    from recipients r\r\n    join today_students ts\r\n      on true\r\n    where r.recipient_role = 'coordinator'\r\n      and not exists (\r\n        select 1\r\n        from recipient_groups rg\r\n        where rg.recipient_id = r.recipient_id\r\n          and rg.group_id = ts.group_id\r\n      )\r\n    group by r.recipient_id, r.recipient_role\r\n  ),\r\n\r\n  team_counts as (\r\n    select\r\n      r.recipient_id,\r\n      r.recipient_role,\r\n      'team_birthdays'::text as notification_kind,\r\n      3 as priority,\r\n      count(distinct tt.profile_id)::int as birthday_count\r\n    from recipients r\r\n    join today_team tt\r\n      on true\r\n    group by r.recipient_id, r.recipient_role\r\n  ),\r\n\r\n  unioned as (\r\n    select * from catechist_student_counts\r\n    union all\r\n    select * from coordinator_my_group_counts\r\n    union all\r\n    select * from coordinator_other_group_counts\r\n    union all\r\n    select * from team_counts\r\n  )\r\n\r\n  select\r\n    d.d as notification_day,\r\n    u.recipient_id,\r\n    u.recipient_role,\r\n    u.notification_kind,\r\n    u.priority,\r\n    u.birthday_count\r\n  from unioned u\r\n  cross join day_ref d\r\n  where u.birthday_count > 0\r\n  order by u.recipient_id, u.priority;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "get_today_birthdays",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.get_today_birthdays()\n RETURNS TABLE(id uuid, name text, age integer)\n LANGUAGE sql\n SECURITY DEFINER\nAS $function$\r\n  with today as (\r\n    select (now() at time zone 'Europe/Madrid')::date as d\r\n  )\r\n  select\r\n    p.id,\r\n    coalesce(p.name, '') as name,\r\n    extract(year from age(t.d, p.birth_date::date))::int as age\r\n  from public.profiles p\r\n  cross join today t\r\n  where p.role in ('catechist', 'coordinator')\r\n    and p.birth_date is not null\r\n    and public.is_birthday_on_day(p.birth_date::date, t.d)\r\n  order by p.name asc\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "get_today_student_birthdays_for_user",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.get_today_student_birthdays_for_user()\n RETURNS TABLE(student_id uuid, student_name text, age integer, group_id uuid)\n LANGUAGE sql\n SECURITY DEFINER\nAS $function$\r\n  with me as (\r\n    select p.role\r\n    from public.profiles p\r\n    where p.id = auth.uid()\r\n    limit 1\r\n  ),\r\n  today as (\r\n    select (now() at time zone 'Europe/Madrid')::date as d\r\n  ),\r\n  eligible_students as (\r\n    select\r\n      s.id as student_id,\r\n      s.name as student_name,\r\n      s.birth_date::date as birth_date,\r\n      s.group_id\r\n    from public.students s\r\n    cross join me\r\n    where s.birth_date is not null\r\n      and (\r\n        me.role = 'coordinator'\r\n        or exists (\r\n          select 1\r\n          from public.group_catechist gc\r\n          where gc.profile_id = auth.uid()\r\n            and gc.group_id = s.group_id\r\n        )\r\n      )\r\n  )\r\n  select\r\n    es.student_id,\r\n    coalesce(es.student_name, '') as student_name,\r\n    extract(year from age(t.d, es.birth_date))::int as age,\r\n    es.group_id\r\n  from eligible_students es\r\n  cross join today t\r\n  where public.is_birthday_on_day(es.birth_date, t.d)\r\n  order by es.student_name asc\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "handle_new_user",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.handle_new_user()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\ndeclare\r\n  bd date;\r\nbegin\r\n  bd := nullif(new.raw_user_meta_data->>'birth_date', '')::date;\r\n\r\n  insert into public.profiles (id, email, name, role, birth_date)\r\n  values (\r\n    new.id,\r\n    new.email,\r\n    coalesce(new.raw_user_meta_data->>'name', ''),\r\n    coalesce(new.raw_user_meta_data->>'role', 'catechist'),\r\n    bd\r\n  )\r\n  on conflict (id) do update\r\n    set email      = excluded.email,\r\n        name       = excluded.name,\r\n        role       = excluded.role,\r\n        birth_date = excluded.birth_date;\r\n\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "is_birthday_on_day",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.is_birthday_on_day(p_birth_date date, p_day date DEFAULT CURRENT_DATE)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$\r\n  select\r\n    case\r\n      when p_birth_date is null then false\r\n\r\n      when extract(month from p_birth_date) = extract(month from p_day)\r\n       and extract(day   from p_birth_date) = extract(day   from p_day)\r\n      then true\r\n\r\n      when extract(month from p_birth_date) = 2\r\n       and extract(day   from p_birth_date) = 29\r\n       and extract(month from p_day) = 2\r\n       and extract(day   from p_day) = 28\r\n       and not (\r\n         (\r\n           mod(extract(year from p_day)::int, 4) = 0\r\n           and mod(extract(year from p_day)::int, 100) <> 0\r\n         )\r\n         or mod(extract(year from p_day)::int, 400) = 0\r\n       )\r\n      then true\r\n\r\n      else false\r\n    end\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "is_coordinator",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.is_coordinator()\n RETURNS boolean\n LANGUAGE sql\n STABLE\nAS $function$\r\n  select exists (\r\n    select 1\r\n    from public.profiles p\r\n    where p.id = auth.uid()\r\n      and p.role = 'coordinator'\r\n  );\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "is_valid_spanish_dni",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.is_valid_spanish_dni(dni_text text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\r\nDECLARE\r\n  clean_dni text;\r\n  number_part bigint;\r\n  letter_part text;\r\n  expected_letter text;\r\n  letters text := 'TRWAGMYFPDXBNJZSQVHLCKE';\r\nBEGIN\r\n  IF dni_text IS NULL OR TRIM(dni_text) = '' THEN\r\n    RETURN true;\r\n  END IF;\r\n\r\n  clean_dni := UPPER(TRIM(dni_text));\r\n\r\n  -- Solo valida DNI clásico: 8 números + letra\r\n  IF clean_dni !~ '^[0-9]{8}[A-Z]$' THEN\r\n    RETURN false;\r\n  END IF;\r\n\r\n  number_part := SUBSTRING(clean_dni FROM 1 FOR 8)::bigint;\r\n  letter_part := SUBSTRING(clean_dni FROM 9 FOR 1);\r\n\r\n  expected_letter := SUBSTRING(\r\n    letters\r\n    FROM ((number_part % 23)::integer + 1)\r\n    FOR 1\r\n  );\r\n\r\n  RETURN letter_part = expected_letter;\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "is_valid_spanish_dni_nie",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.is_valid_spanish_dni_nie(doc_text text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\r\nDECLARE\r\n  clean_doc text;\r\n  numeric_part text;\r\n  letter_part text;\r\n  expected_letter text;\r\n  letters text := 'TRWAGMYFPDXBNJZSQVHLCKE';\r\n  doc_number bigint;\r\nBEGIN\r\n  IF doc_text IS NULL OR TRIM(doc_text) = '' THEN\r\n    RETURN true;\r\n  END IF;\r\n\r\n  clean_doc := UPPER(TRIM(doc_text));\r\n\r\n  -- Caso DNI: 8 números + letra\r\n  IF clean_doc ~ '^[0-9]{8}[A-Z]$' THEN\r\n    numeric_part := SUBSTRING(clean_doc FROM 1 FOR 8);\r\n    letter_part := SUBSTRING(clean_doc FROM 9 FOR 1);\r\n\r\n    doc_number := numeric_part::bigint;\r\n    expected_letter := SUBSTRING(\r\n      letters\r\n      FROM ((doc_number % 23)::integer + 1)\r\n      FOR 1\r\n    );\r\n\r\n    RETURN letter_part = expected_letter;\r\n  END IF;\r\n\r\n  -- Caso NIE: X/Y/Z + 7 números + letra\r\n  IF clean_doc ~ '^[XYZ][0-9]{7}[A-Z]$' THEN\r\n    numeric_part :=\r\n      CASE SUBSTRING(clean_doc FROM 1 FOR 1)\r\n        WHEN 'X' THEN '0'\r\n        WHEN 'Y' THEN '1'\r\n        WHEN 'Z' THEN '2'\r\n      END\r\n      || SUBSTRING(clean_doc FROM 2 FOR 7);\r\n\r\n    letter_part := SUBSTRING(clean_doc FROM 9 FOR 1);\r\n\r\n    doc_number := numeric_part::bigint;\r\n    expected_letter := SUBSTRING(\r\n      letters\r\n      FROM ((doc_number % 23)::integer + 1)\r\n      FOR 1\r\n    );\r\n\r\n    RETURN letter_part = expected_letter;\r\n  END IF;\r\n\r\n  RETURN false;\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "normalize_students_dni",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.normalize_students_dni()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nBEGIN\r\n  IF NEW.dni IS NOT NULL THEN\r\n    NEW.dni := UPPER(TRIM(NEW.dni));\r\n  END IF;\r\n\r\n  RETURN NEW;\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "promote_academic_year",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.promote_academic_year(p_dry_run boolean DEFAULT false)\n RETURNS jsonb\n LANGUAGE plpgsql\nAS $function$\r\nDECLARE\r\n  v_month              int;\r\n  v_target_year        int;\r\n  v_already            timestamptz;\r\n  v_graduating_groups  uuid[];\r\n  v_graduating_students uuid[];\r\n\r\n  v_deleted_attendance int := 0;\r\n  v_deleted_incidents  int := 0;\r\n  v_deleted_services   int := 0;\r\n  v_deleted_tokens     int := 0;\r\n  v_cleared_verif      int := 0;\r\n  v_deleted_access     int := 0;\r\n  v_deleted_students   int := 0;\r\n  v_deleted_links      int := 0;\r\n  v_deleted_groups     int := 0;\r\n  v_renamed            int := 0;\r\nBEGIN\r\n  -- ---------------------------------------------------------------- guardas\r\n  v_month := EXTRACT(MONTH FROM (now() AT TIME ZONE 'Europe/Madrid'))::int;\r\n\r\n  IF v_month NOT IN (8, 9, 10) THEN\r\n    RAISE EXCEPTION 'Fuera de plazo: la promoción solo puede hacerse en agosto, septiembre u octubre (mes actual: %).', v_month\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  -- En los tres meses permitidos, el curso de destino es siempre el que empieza\r\n  -- este mismo año natural: en agosto de 2026 se promociona al CURSO 26-27.\r\n  v_target_year := EXTRACT(YEAR FROM (now() AT TIME ZONE 'Europe/Madrid'))::int;\r\n\r\n  SELECT promoted_at INTO v_already\r\n  FROM public.academic_year_promotions\r\n  WHERE academic_year_start = v_target_year;\r\n\r\n  IF v_already IS NOT NULL THEN\r\n    RAISE EXCEPTION 'El curso %-% ya se promocionó el %. No se puede repetir.',\r\n      v_target_year, v_target_year + 1, to_char(v_already AT TIME ZONE 'Europe/Madrid', 'DD/MM/YYYY HH24:MI')\r\n      USING ERRCODE = 'check_violation';\r\n  END IF;\r\n\r\n  -- -------------------------------------------------- 1. snapshot (pre-rename)\r\n  SELECT coalesce(array_agg(id), '{}') INTO v_graduating_groups\r\n  FROM public.groups\r\n  WHERE name LIKE '2º CONFIRMACIÓN%';\r\n\r\n  SELECT coalesce(array_agg(id), '{}') INTO v_graduating_students\r\n  FROM public.students\r\n  WHERE group_id = ANY (v_graduating_groups);\r\n\r\n  -- ------------------------------------------------------- 2. bajas de alumnos\r\n  -- Se borra de hijos a padres para no depender de que existan ON DELETE CASCADE.\r\n  IF array_length(v_graduating_students, 1) > 0 THEN\r\n\r\n    -- parent_email_verifications no se borra: la verificación pertenece al email\r\n    -- del padre/madre, que puede seguir teniendo otros hijos en catequesis.\r\n    -- Solo se desvincula del alumno que se da de baja.\r\n    UPDATE public.parent_email_verifications\r\n       SET last_student_id = NULL\r\n     WHERE last_student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_cleared_verif = ROW_COUNT;\r\n\r\n    DELETE FROM public.parent_email_verification_tokens\r\n     WHERE student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_tokens = ROW_COUNT;\r\n\r\n    DELETE FROM public.mass_services\r\n     WHERE student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_services = ROW_COUNT;\r\n\r\n    DELETE FROM public.incidents\r\n     WHERE student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_incidents = ROW_COUNT;\r\n\r\n    DELETE FROM public.student_attendance\r\n     WHERE student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_attendance = ROW_COUNT;\r\n\r\n    DELETE FROM public.student_public_access\r\n     WHERE student_id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_access = ROW_COUNT;\r\n\r\n    DELETE FROM public.students\r\n     WHERE id = ANY (v_graduating_students);\r\n    GET DIAGNOSTICS v_deleted_students = ROW_COUNT;\r\n  END IF;\r\n\r\n  -- --------------------------------------------------- 3. grupos ya vaciados\r\n  IF array_length(v_graduating_groups, 1) > 0 THEN\r\n    DELETE FROM public.group_catechist\r\n     WHERE group_id = ANY (v_graduating_groups);\r\n    GET DIAGNOSTICS v_deleted_links = ROW_COUNT;\r\n\r\n    DELETE FROM public.groups\r\n     WHERE id = ANY (v_graduating_groups);\r\n    GET DIAGNOSTICS v_deleted_groups = ROW_COUNT;\r\n  END IF;\r\n\r\n  -- ------------------------------------------------------ 4. cadena de nombres\r\n  -- Un único UPDATE con CASE: todas las condiciones se evalúan contra el valor\r\n  -- antiguo, así que no hay efecto cascada entre niveles.\r\n  UPDATE public.groups\r\n     SET name = CASE\r\n                  WHEN name LIKE '1º CONFIRMACIÓN%'\r\n                    THEN '2º CONFIRMACIÓN'    || substring(name from length('1º CONFIRMACIÓN') + 1)\r\n                  WHEN name LIKE '2º PRECONFIRMACIÓN%'\r\n                    THEN '1º CONFIRMACIÓN'    || substring(name from length('2º PRECONFIRMACIÓN') + 1)\r\n                  WHEN name LIKE '1º PRECONFIRMACIÓN%'\r\n                    THEN '2º PRECONFIRMACIÓN' || substring(name from length('1º PRECONFIRMACIÓN') + 1)\r\n                END\r\n   WHERE name LIKE '1º CONFIRMACIÓN%'\r\n      OR name LIKE '2º PRECONFIRMACIÓN%'\r\n      OR name LIKE '1º PRECONFIRMACIÓN%';\r\n  GET DIAGNOSTICS v_renamed = ROW_COUNT;\r\n\r\n  -- ------------------------------------------------------- 5. dejar constancia\r\n  -- Dentro de la misma transacción: si la promoción se deshace, el registro\r\n  -- también, y el botón vuelve a estar disponible.\r\n  INSERT INTO public.academic_year_promotions (academic_year_start, summary)\r\n  VALUES (\r\n    v_target_year,\r\n    jsonb_build_object(\r\n      'alumnos_baja',       coalesce(array_length(v_graduating_students, 1), 0),\r\n      'grupos_eliminados',  v_deleted_groups,\r\n      'grupos_renombrados', v_renamed\r\n    )\r\n  );\r\n\r\n  -- p_dry_run permite ensayar la operación completa y descartarla: se calcula\r\n  -- todo de verdad y se deshace al lanzar la excepción, que aborta la transacción.\r\n  IF p_dry_run THEN\r\n    RAISE EXCEPTION 'DRY_RUN_OK %', jsonb_build_object(\r\n      'grupos_graduados',   coalesce(array_length(v_graduating_groups, 1), 0),\r\n      'alumnos_baja',       coalesce(array_length(v_graduating_students, 1), 0),\r\n      'asistencias',        v_deleted_attendance,\r\n      'incidencias',        v_deleted_incidents,\r\n      'servicios',          v_deleted_services,\r\n      'grupos_renombrados', v_renamed\r\n    )::text\r\n      USING ERRCODE = 'no_data';\r\n  END IF;\r\n\r\n  RETURN jsonb_build_object(\r\n    'ok', true,\r\n    'alumnos_dados_de_baja',   coalesce(array_length(v_graduating_students, 1), 0),\r\n    'ids_alumnos',             to_jsonb(v_graduating_students),\r\n    'grupos_eliminados',       v_deleted_groups,\r\n    'grupos_renombrados',      v_renamed,\r\n    'filas_borradas', jsonb_build_object(\r\n      'student_attendance',                v_deleted_attendance,\r\n      'incidents',                         v_deleted_incidents,\r\n      'mass_services',                     v_deleted_services,\r\n      'parent_email_verification_tokens',  v_deleted_tokens,\r\n      'student_public_access',             v_deleted_access,\r\n      'students',                          v_deleted_students,\r\n      'group_catechist',                   v_deleted_links\r\n    ),\r\n    'parent_email_verifications_desvinculadas', v_cleared_verif\r\n  );\r\nEND;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "regenerate_student_public_id",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.regenerate_student_public_id(p_student_id uuid)\n RETURNS TABLE(student_id uuid, public_id text)\n LANGUAGE plpgsql\nAS $function$\r\ndeclare\r\n  new_public_id text;\r\nbegin\r\n  new_public_id := public.generate_unique_student_public_id();\r\n\r\n  insert into public.student_public_access (student_id, public_id)\r\n  values (p_student_id, new_public_id)\r\n  on conflict (student_id)\r\n  do update set public_id = excluded.public_id;\r\n\r\n  return query\r\n  select spa.student_id, spa.public_id\r\n  from public.student_public_access spa\r\n  where spa.student_id = p_student_id;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "set_incident_profile_id",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.set_incident_profile_id()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\nAS $function$\r\nbegin\r\n  -- siempre el usuario autenticado\r\n  new.profile_id := auth.uid();\r\n  -- si no te llega registration_date, lo fijamos\r\n  if new.registration_date is null then\r\n    new.registration_date := current_date;\r\n  end if;\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "set_updated_at",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nbegin\r\n  new.updated_at = now();\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "function",
+    "name": "touch_dni_verification_session",
+    "data": {
+      "def": "CREATE OR REPLACE FUNCTION public.touch_dni_verification_session()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nbegin\r\n  new.updated_at = now();\r\n  return new;\r\nend;\r\n$function$\n"
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "academic_year_promotions.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "academic_year_promotions.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "birthday_push_log.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "birthday_push_log.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "catechist_attendance.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "catechist_attendance.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "catechist_attendance_events.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "catechist_attendance_events.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "class_days.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "class_days.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "drive_index_items.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "drive_index_items.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "drive_sync_state.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "drive_sync_state.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_drive_connections.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_drive_connections.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_events.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_events.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_processed_responses.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_processed_responses.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_watches.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_form_watches.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_oauth_tokens.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "google_oauth_tokens.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "group_catechist.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "group_catechist.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "groups.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "groups.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "incidents.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "incidents.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "mass_services.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "mass_services.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "monthly_reports.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "monthly_reports.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parent_email_verification_tokens.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parent_email_verification_tokens.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parent_email_verifications.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parent_email_verifications.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parish_events.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "parish_events.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "profiles.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "profiles.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "public_form_email_verification_tokens.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "public_form_email_verification_tokens.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "push_subscriptions.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "push_subscriptions.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "registration_form_groups.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "registration_form_groups.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "registration_forms.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "registration_forms.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "school_names.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "school_names.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "student_attendance.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "student_attendance.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "student_public_access.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "student_public_access.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "students.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "students.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "students_import_tmp.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "students_import_tmp.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "v_catechist_attendance_events_norm.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "v_catechist_attendance_events_norm.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "v_catechist_attendance_norm.anon",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "grant",
+    "name": "v_catechist_attendance_norm.authenticated",
+    "data": {
+      "privileges": [
+        "DELETE",
+        "INSERT",
+        "REFERENCES",
+        "SELECT",
+        "TRIGGER",
+        "TRUNCATE",
+        "UPDATE"
+      ]
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "academic_year_promotions.promotions_select_authenticated",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "true",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "academic_year_promotions",
+      "permissive": "PERMISSIVE",
+      "policyname": "promotions_select_authenticated",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance.catechist_attendance_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_attendance_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance.catechist_attendance_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_attendance_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance.catechist_attendance_self_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(profile_id = auth.uid())",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_attendance_self_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance.catechist_attendance_write",
+    "data": {
+      "cmd": "ALL",
+      "qual": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_attendance_write",
+      "schemaname": "public",
+      "with_check": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance_events.catechist_att_events_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_att_events_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "catechist_attendance_events.catechist_att_events_write",
+    "data": {
+      "cmd": "ALL",
+      "qual": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "catechist_attendance_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_att_events_write",
+      "schemaname": "public",
+      "with_check": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (profile_id = auth.uid()))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "class_days.class_days_auth_read",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.role() = 'authenticated'::text)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "class_days",
+      "permissive": "PERMISSIVE",
+      "policyname": "class_days_auth_read",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "class_days.class_days_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "class_days",
+      "permissive": "PERMISSIVE",
+      "policyname": "class_days_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "drive_index_items.Users can read their own drive index items",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "drive_index_items",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can read their own drive index items",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "drive_sync_state.Users can read their own drive sync state",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "drive_sync_state",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can read their own drive sync state",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "google_drive_connections.Users can delete their own google drive connection",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "google_drive_connections",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can delete their own google drive connection",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "google_drive_connections.Users can insert their own google drive connection",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "google_drive_connections",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can insert their own google drive connection",
+      "schemaname": "public",
+      "with_check": "(auth.uid() = user_id)"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "google_drive_connections.Users can read their own google drive connection",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "google_drive_connections",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can read their own google drive connection",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "google_drive_connections.Users can update their own google drive connection",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "google_drive_connections",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can update their own google drive connection",
+      "schemaname": "public",
+      "with_check": "(auth.uid() = user_id)"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "group_catechist.gc_select_own",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(profile_id = auth.uid())",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "group_catechist",
+      "permissive": "PERMISSIVE",
+      "policyname": "gc_select_own",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "group_catechist.group_catechist_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "group_catechist",
+      "permissive": "PERMISSIVE",
+      "policyname": "group_catechist_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "groups.groups_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "groups_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "groups.groups_select_all_authenticated",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "true",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "groups_select_all_authenticated",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "incidents.incidents_delete",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "can_access_student(student_id)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "incidents",
+      "permissive": "PERMISSIVE",
+      "policyname": "incidents_delete",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "incidents.incidents_insert",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "public"
+      ],
+      "tablename": "incidents",
+      "permissive": "PERMISSIVE",
+      "policyname": "incidents_insert",
+      "schemaname": "public",
+      "with_check": "(can_access_student(student_id) AND (profile_id = auth.uid()))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "incidents.incidents_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "can_access_student(student_id)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "incidents",
+      "permissive": "PERMISSIVE",
+      "policyname": "incidents_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "incidents.incidents_update",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "can_access_student(student_id)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "incidents",
+      "permissive": "PERMISSIVE",
+      "policyname": "incidents_update",
+      "schemaname": "public",
+      "with_check": "(can_access_student(student_id) AND (is_coordinator() OR (profile_id = auth.uid())))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "mass_services.mass_services_modify_own_or_coordinator",
+    "data": {
+      "cmd": "ALL",
+      "qual": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = mass_services.student_id) AND (gc.profile_id = auth.uid())))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "mass_services",
+      "permissive": "PERMISSIVE",
+      "policyname": "mass_services_modify_own_or_coordinator",
+      "schemaname": "public",
+      "with_check": "((EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text)))) OR (EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = mass_services.student_id) AND (gc.profile_id = auth.uid())))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "monthly_reports.catechist_can_read_own_group_reports",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "((scope = 'group'::report_scope) AND (EXISTS ( SELECT 1\n   FROM (profiles p\n     JOIN group_catechist gc ON ((gc.profile_id = p.id)))\n  WHERE ((p.id = auth.uid()) AND (p.role = 'catechist'::text) AND (gc.group_id = monthly_reports.scope_id)))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "monthly_reports",
+      "permissive": "PERMISSIVE",
+      "policyname": "catechist_can_read_own_group_reports",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "monthly_reports.coordinator_can_read_all_reports",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "monthly_reports",
+      "permissive": "PERMISSIVE",
+      "policyname": "coordinator_can_read_all_reports",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "objects.media_auth_all 1ps738_0",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(bucket_id = 'media'::text)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "objects",
+      "permissive": "PERMISSIVE",
+      "policyname": "media_auth_all 1ps738_0",
+      "schemaname": "storage",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "objects.media_auth_all 1ps738_1",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "objects",
+      "permissive": "PERMISSIVE",
+      "policyname": "media_auth_all 1ps738_1",
+      "schemaname": "storage",
+      "with_check": "(bucket_id = 'media'::text)"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "objects.media_auth_all 1ps738_2",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(bucket_id = 'media'::text)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "objects",
+      "permissive": "PERMISSIVE",
+      "policyname": "media_auth_all 1ps738_2",
+      "schemaname": "storage",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "objects.media_auth_all 1ps738_3",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "(bucket_id = 'media'::text)",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "objects",
+      "permissive": "PERMISSIVE",
+      "policyname": "media_auth_all 1ps738_3",
+      "schemaname": "storage",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "parish_events.parish_events_auth_read",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.role() = 'authenticated'::text)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "parish_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "parish_events_auth_read",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "parish_events.parish_events_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "parish_events",
+      "permissive": "PERMISSIVE",
+      "policyname": "parish_events_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "profiles.coordinator can update any profile",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles me\n  WHERE ((me.id = auth.uid()) AND (me.role = 'coordinator'::text))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "coordinator can update any profile",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles me\n  WHERE ((me.id = auth.uid()) AND (me.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "profiles.profiles_read_all_authenticated",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "true",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "profiles_read_all_authenticated",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "profiles.profiles_self_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(id = auth.uid())",
+      "roles": [
+        "public"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "profiles_self_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "profiles.profiles_self_update_limited",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(id = auth.uid())",
+      "roles": [
+        "public"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "profiles_self_update_limited",
+      "schemaname": "public",
+      "with_check": "(id = auth.uid())"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "push_subscriptions.Users can delete their push subscriptions",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "push_subscriptions",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can delete their push subscriptions",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "push_subscriptions.Users can insert their push subscriptions",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "public"
+      ],
+      "tablename": "push_subscriptions",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can insert their push subscriptions",
+      "schemaname": "public",
+      "with_check": "(auth.uid() = user_id)"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "push_subscriptions.Users can read their push subscriptions",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(auth.uid() = user_id)",
+      "roles": [
+        "public"
+      ],
+      "tablename": "push_subscriptions",
+      "permissive": "PERMISSIVE",
+      "policyname": "Users can read their push subscriptions",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_form_groups.registration_form_groups_delete_admin",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_form_groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_form_groups_delete_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_form_groups.registration_form_groups_insert_admin",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_form_groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_form_groups_insert_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_form_groups.registration_form_groups_select_admin",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_form_groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_form_groups_select_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_form_groups.registration_form_groups_update_admin",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_form_groups",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_form_groups_update_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_forms.registration_forms_delete_admin",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_forms",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_forms_delete_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_forms.registration_forms_insert_admin",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_forms",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_forms_insert_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_forms.registration_forms_select_admin",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_forms",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_forms_select_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_forms.registration_forms_select_public_forms",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "((access_type = 'public'::text) AND (active = true))",
+      "roles": [
+        "anon",
+        "authenticated"
+      ],
+      "tablename": "registration_forms",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_forms_select_public_forms",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "registration_forms.registration_forms_update_admin",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "registration_forms",
+      "permissive": "PERMISSIVE",
+      "policyname": "registration_forms_update_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "school_names.school_names_select_catechist_coordinator",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = ANY (ARRAY['catechist'::text, 'coordinator'::text])))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "school_names",
+      "permissive": "PERMISSIVE",
+      "policyname": "school_names_select_catechist_coordinator",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "school_names.school_names_write_coordinator",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "school_names",
+      "permissive": "PERMISSIVE",
+      "policyname": "school_names_write_coordinator",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_attendance.student_attendance_catechist_delete",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = student_attendance.student_id) AND (gc.profile_id = auth.uid()))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_attendance_catechist_delete",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_attendance.student_attendance_catechist_insert",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_attendance_catechist_insert",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = student_attendance.student_id) AND (gc.profile_id = auth.uid()))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_attendance.student_attendance_catechist_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = student_attendance.student_id) AND (gc.profile_id = auth.uid()))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_attendance_catechist_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_attendance.student_attendance_catechist_update",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = student_attendance.student_id) AND (gc.profile_id = auth.uid()))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_attendance_catechist_update",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM (students s\n     JOIN group_catechist gc ON ((gc.group_id = s.group_id)))\n  WHERE ((s.id = student_attendance.student_id) AND (gc.profile_id = auth.uid()))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_attendance.student_attendance_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "student_attendance",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_attendance_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_public_access.student_public_access_delete_admin",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_public_access",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_public_access_delete_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_public_access.student_public_access_insert_admin",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_public_access",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_public_access_insert_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_public_access.student_public_access_select_admin",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_public_access",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_public_access_select_admin",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_public_access.student_public_access_select_visible_student",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM students s\n  WHERE (s.id = student_public_access.student_id)))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_public_access",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_public_access_select_visible_student",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "student_public_access.student_public_access_update_admin",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "is_coordinator()",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "student_public_access",
+      "permissive": "PERMISSIVE",
+      "policyname": "student_public_access_update_admin",
+      "schemaname": "public",
+      "with_check": "is_coordinator()"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_catechist_delete",
+    "data": {
+      "cmd": "DELETE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_catechist_delete",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_catechist_group_select",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_catechist_group_select",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_catechist_insert",
+    "data": {
+      "cmd": "INSERT",
+      "qual": null,
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_catechist_insert",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_catechist_update",
+    "data": {
+      "cmd": "UPDATE",
+      "qual": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_catechist_update",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_coordinator_full_access",
+    "data": {
+      "cmd": "ALL",
+      "qual": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))",
+      "roles": [
+        "public"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_coordinator_full_access",
+      "schemaname": "public",
+      "with_check": "(EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = auth.uid()) AND (p.role = 'coordinator'::text))))"
+    }
+  },
+  {
+    "kind": "policy",
+    "name": "students.students_select_my_groups",
+    "data": {
+      "cmd": "SELECT",
+      "qual": "(EXISTS ( SELECT 1\n   FROM group_catechist gc\n  WHERE ((gc.profile_id = auth.uid()) AND (gc.group_id = students.group_id))))",
+      "roles": [
+        "authenticated"
+      ],
+      "tablename": "students",
+      "permissive": "PERMISSIVE",
+      "policyname": "students_select_my_groups",
+      "schemaname": "public",
+      "with_check": null
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "academic_year_promotions",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "birthday_push_log",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "catechist_attendance",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "catechist_attendance_events",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "class_days",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "dni_verification_sessions",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "drive_index_items",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "drive_sync_state",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "google_drive_connections",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "google_form_events",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "google_form_processed_responses",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "google_form_watches",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "google_oauth_tokens",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "group_catechist",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "groups",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "incidents",
+    "data": {
+      "forced": true,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "mass_services",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "monthly_reports",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "parent_email_verification_tokens",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "parent_email_verifications",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "parish_events",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "profiles",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "public_form_email_verification_tokens",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "push_subscriptions",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "registration_form_groups",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "registration_forms",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "school_names",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "student_attendance",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "student_public_access",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "students",
+    "data": {
+      "forced": false,
+      "enabled": true
+    }
+  },
+  {
+    "kind": "rls",
+    "name": "students_import_tmp",
+    "data": {
+      "forced": false,
+      "enabled": false
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "dni_verification_sessions.dni_verification_sessions_touch",
+    "data": {
+      "def": "CREATE TRIGGER dni_verification_sessions_touch BEFORE UPDATE ON public.dni_verification_sessions FOR EACH ROW EXECUTE FUNCTION touch_dni_verification_session()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "drive_index_items.set_drive_index_items_updated_at",
+    "data": {
+      "def": "CREATE TRIGGER set_drive_index_items_updated_at BEFORE UPDATE ON public.drive_index_items FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "drive_sync_state.set_drive_sync_state_updated_at",
+    "data": {
+      "def": "CREATE TRIGGER set_drive_sync_state_updated_at BEFORE UPDATE ON public.drive_sync_state FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "incidents.trg_set_incident_profile_id",
+    "data": {
+      "def": "CREATE TRIGGER trg_set_incident_profile_id BEFORE INSERT ON public.incidents FOR EACH ROW EXECUTE FUNCTION set_incident_profile_id()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "parish_events.trg_parish_events_uppercase",
+    "data": {
+      "def": "CREATE TRIGGER trg_parish_events_uppercase BEFORE INSERT OR UPDATE ON public.parish_events FOR EACH ROW EXECUTE FUNCTION force_uppercase_column('title')"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "profiles.trg_profiles_uppercase",
+    "data": {
+      "def": "CREATE TRIGGER trg_profiles_uppercase BEFORE INSERT OR UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION force_uppercase_column('name')"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "students.trg_create_student_public_access",
+    "data": {
+      "def": "CREATE TRIGGER trg_create_student_public_access AFTER INSERT ON public.students FOR EACH ROW EXECUTE FUNCTION create_student_public_access()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "students.trg_normalize_students_dni",
+    "data": {
+      "def": "CREATE TRIGGER trg_normalize_students_dni BEFORE INSERT OR UPDATE ON public.students FOR EACH ROW EXECUTE FUNCTION normalize_students_dni()"
+    }
+  },
+  {
+    "kind": "trigger",
+    "name": "students.trg_students_uppercase",
+    "data": {
+      "def": "CREATE TRIGGER trg_students_uppercase BEFORE INSERT OR UPDATE ON public.students FOR EACH ROW EXECUTE FUNCTION force_uppercase_column('name')"
+    }
+  },
+  {
+    "kind": "view",
+    "name": "v_catechist_attendance_events_norm",
+    "data": {
+      "def": " SELECT profile_id,\n    date,\n    COALESCE(status, 'absent'::text) AS status\n   FROM catechist_attendance_events;"
+    }
+  },
+  {
+    "kind": "view",
+    "name": "v_catechist_attendance_norm",
+    "data": {
+      "def": " SELECT profile_id,\n    date,\n    COALESCE(catechism, 'absent'::character varying) AS catechism,\n    COALESCE(mass, 'absent'::character varying) AS mass\n   FROM catechist_attendance;"
+    }
+  }
+]

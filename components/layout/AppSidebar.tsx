@@ -3,6 +3,7 @@ import { Church, LogOut, Menu, User as UserIcon, X } from "lucide-react";
 import { NAVIGATION_SECTIONS } from "../../src/app/navigation";
 import { User } from "../../types";
 import { View } from "../../types/app";
+import { getRoleLabel } from "../../src/utils/stages";
 
 interface AppSidebarProps {
   currentUser: User;
@@ -128,8 +129,8 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
               <p className="text-sm font-medium text-slate-900 truncate">
                 {currentUser.name}
               </p>
-              <p className="text-xs text-slate-500 truncate capitalize">
-                {currentUser.role}
+              <p className="text-xs text-slate-500 truncate">
+                {getRoleLabel(currentUser)}
               </p>
             </div>
 

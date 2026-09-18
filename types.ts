@@ -1,4 +1,6 @@
 import { AcademicYear, getAcademicYearCutoff, getCurrentAcademicYear } from './src/utils/academicYear';
+import { getEventsForStages } from './src/utils/stages';
+import type { EventStage, Stage } from './src/utils/stages';
 
 export type UserRole = 'catechist' | 'coordinator';
 
@@ -10,6 +12,13 @@ export interface User {
   email: string;
   password?: string; // Added password field
   role: UserRole;
+  /**
+   * Etapa del perfil (profiles.stage). En un coordinator, null = global.
+   * En un catequista es opcional: sus etapas reales salen de sus grupos.
+   */
+  stage?: Stage | null;
+  /** Etapas efectivas (ver getUserStages). Lo calcula App, no viene de la BD. */
+  stages?: Stage[];
   assignedGroupId?: string; // Main group for catechist view
   birthDate?: string;
   photo?: string;
@@ -28,6 +37,8 @@ export interface CatechistAttendanceRecord {
 export interface Group {
   id: string;
   name: string;
+  /** Etapa derivada del nombre (groups.stage, columna generada). */
+  stage: Stage | null;
   catechistIds: string[]; // IDs of users assigned to this group
 }
 
@@ -35,6 +46,8 @@ export interface ParishEvent {
   id: string;
   title: string;
   date: string;
+  /** A quién afecta: una etapa o las dos. */
+  stage: EventStage;
   description?: string;
 }
 
@@ -139,6 +152,10 @@ export const calculateStudentRate = (
 /**
  * Calculates catechist attendance rate including class days and events, scoped to
  * the given academic year. Defaults to the current academic year.
+ *
+ * Solo cuentan los eventos de las etapas del catequista (más los de 'all'): a
+ * uno de preconfirmación no se le descuenta un evento de confirmación. Si no
+ * se le han calculado etapas se usan todos los eventos recibidos.
  */
 export const calculateCatechistRate = (
   catechist: User,
@@ -149,8 +166,10 @@ export const calculateCatechistRate = (
   const year = academicYear ?? getCurrentAcademicYear();
   const cutoff = getAcademicYearCutoff(year);
 
+  const applicableEvents = catechist.stages ? getEventsForStages(events, catechist.stages) : events;
+
   const pastClassDays = classDays.filter(day => day >= year.start && day <= cutoff);
-  const pastEvents = events.filter(e => e.date >= year.start && e.date <= cutoff);
+  const pastEvents = applicableEvents.filter(e => e.date >= year.start && e.date <= cutoff);
 
   const totalOccurrences = pastClassDays.length + pastEvents.length;
   if (totalOccurrences === 0) return 100;

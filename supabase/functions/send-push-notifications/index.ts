@@ -14,6 +14,11 @@ type RequestBody = {
   body: string;
   url?: string;
   userIds?: string[];
+  /**
+   * Limita el envío a la gente de una etapa (más los coordinadores globales).
+   * 'all', vacío o ausente = todo el mundo. Se combina con userIds (AND).
+   */
+  stage?: "preconfirmation" | "confirmation" | "all" | null;
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -63,9 +68,40 @@ Deno.serve(async (req) => {
       );
     }
 
-    const targetUserIds = Array.isArray(body.userIds)
+    let targetUserIds = Array.isArray(body.userIds)
       ? [...new Set(body.userIds.filter((v) => typeof v === "string" && v.trim().length > 0))]
       : [];
+
+    // Filtro por etapa: la BD resuelve quién pertenece a ella (grupos,
+    // profiles.stage y coordinadores globales) para no duplicar la regla aquí.
+    const stage = body.stage === "preconfirmation" || body.stage === "confirmation" ? body.stage : null;
+
+    if (stage) {
+      const { data: stageIds, error: stageErr } = await supabase.rpc("profile_ids_for_stage", {
+        p_stage: stage,
+      });
+
+      if (stageErr) {
+        throw new Error(`Error resolviendo destinatarios de la etapa: ${stageErr.message}`);
+      }
+
+      const allowed = new Set(
+        ((stageIds ?? []) as { profile_id: string }[]).map((row) => String(row.profile_id))
+      );
+
+      targetUserIds =
+        targetUserIds.length > 0
+          ? targetUserIds.filter((id) => allowed.has(id))
+          : [...allowed];
+
+      // Nadie en esa etapa: no hay que mandar nada (y sin filtro se enviaría a todos).
+      if (targetUserIds.length === 0) {
+        return new Response(
+          JSON.stringify({ ok: true, sent: 0, removed: 0, total: 0, stage }),
+          { status: 200, headers: corsHeaders }
+        );
+      }
+    }
 
     let subsQuery = supabase
       .from("push_subscriptions")

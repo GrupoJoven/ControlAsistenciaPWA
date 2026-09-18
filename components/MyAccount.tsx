@@ -3,6 +3,7 @@ import { User as UserIcon, Bell, BellOff, Link as LinkIcon, HardDrive, CheckCirc
 import { subscribeToPush, unsubscribeFromPush } from "../src/pwa/push";
 import { getGoogleDriveConnection, startGoogleDriveOAuth, GoogleDriveConnection } from "../src/lib/googleDrive";
 import { User, Group } from "../types";
+import { getRoleLabel } from "../src/utils/stages";
 
 interface MyAccountProps {
   user: User;
@@ -26,6 +27,8 @@ const MyAccount: React.FC<MyAccountProps> = ({
   const groupName =
     groups.find((g) => g.id === activeGroupId)?.name ||
     (user.role === "coordinator" ? "Coordinación" : "Sin grupo");
+
+  const roleLabel = getRoleLabel(user);
 
   const birth = user.birthDate ? String(user.birthDate).slice(0, 10) : "";
   const [pushLoading, setPushLoading] = useState(false);
@@ -179,6 +182,15 @@ const MyAccount: React.FC<MyAccountProps> = ({
             </label>
             <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
               {user.name || "-"}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 ml-1">
+              Rol
+            </label>
+            <div className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800">
+              {roleLabel}
             </div>
           </div>
 

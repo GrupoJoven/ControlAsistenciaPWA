@@ -83,6 +83,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // El global puede resetear a cualquiera; un coordinador de etapa solo a
+    // los catequistas de su etapa (nunca a otro coordinador). La regla vive en
+    // la BD (can_manage_profile) y se evalúa con el token del caller.
+    const { data: canManage, error: canManageErr } = await caller.rpc("can_manage_profile", {
+      _profile_id: body.userId,
+    });
+
+    if (canManageErr || canManage !== true) {
+      return new Response(JSON.stringify({ error: "Prohibido: ese usuario no es un catequista de tu etapa" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // 3) Admin update password
     const admin = createClient(supabaseUrl, serviceRoleKey);
 

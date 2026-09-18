@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
 
     const { data: profile, error: profErr } = await caller
       .from("profiles")
-      .select("role")
+      .select("role, stage")
       .eq("id", callerId)
       .single();
 
@@ -58,6 +58,11 @@ Deno.serve(async (req) => {
     if (profile.role !== "coordinator") {
       return new Response(JSON.stringify({ error: "Prohibido: solo coordinator" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
     }
+
+    // Un coordinador de etapa (profiles.stage no nulo) crea catequistas de su
+    // etapa: se les marca la misma stage para que le aparezcan en el registro
+    // aunque todavía no tengan grupo. El global no marca nada.
+    const callerStage: string | null = profile.stage ?? null;
 
     // 2) Crear usuario con Admin API (service role)
     const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -71,11 +76,39 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Faltan email/password/name" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
     }
 
+    const groupIds = Array.isArray(body.group_ids) ? body.group_ids.filter(Boolean) : [];
+    const uniqueGroupIds = Array.from(new Set(groupIds));
+
+    // Los grupos se comprueban con el cliente del caller: RLS solo le deja ver
+    // los de su etapa, así que cualquier id que no vuelva es de la otra (o no
+    // existe). Se valida ANTES de crear el usuario para no dejarlo a medias.
+    if (uniqueGroupIds.length > 0) {
+      const { data: visibleGroups, error: groupsErr } = await caller
+        .from("groups")
+        .select("id, stage")
+        .in("id", uniqueGroupIds);
+
+      if (groupsErr) {
+        return new Response(JSON.stringify({ error: "No se pudieron comprobar los grupos: " + groupsErr.message }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
+      }
+
+      const manageable = new Set(
+        (visibleGroups ?? [])
+          .filter((g: any) => callerStage === null || g.stage === callerStage)
+          .map((g: any) => g.id)
+      );
+      const forbidden = uniqueGroupIds.filter((id) => !manageable.has(id));
+
+      if (forbidden.length > 0) {
+        return new Response(JSON.stringify({ error: "Alguno de los grupos no es de tu etapa o no existe." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
+      }
+    }
+
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email: body.email,
       password: body.password,
       email_confirm: true,
-      user_metadata: { name: body.name, role: "catechist" },
+      user_metadata: { name: body.name, role: "catechist", stage: callerStage },
     });
 
     if (createErr || !created?.user) {
@@ -83,9 +116,6 @@ Deno.serve(async (req) => {
     }
 
     const newUserId = created.user.id;
-
-    const groupIds = Array.isArray(body.group_ids) ? body.group_ids.filter(Boolean) : [];
-    const uniqueGroupIds = Array.from(new Set(groupIds));
 
     if (uniqueGroupIds.length > 0) {
       const rows = uniqueGroupIds.map(group_id => ({
@@ -113,7 +143,8 @@ Deno.serve(async (req) => {
     const updatePayload: Record<string, any> = {
       name: body.name,
       role: "catechist",
-      email: body.email,               
+      stage: callerStage,
+      email: body.email,
       birth_date: body.birth_date ?? null,
     };
 

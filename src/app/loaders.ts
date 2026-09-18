@@ -2,6 +2,7 @@ import { supabase } from "../lib/supabaseClient";
 import { getOfflineData, saveOfflineData } from "../utils/offlineStorage";
 import { SchoolName, GroupCatechistLink } from "../types/app";
 import { Group, User, ParishEvent, Student, AttendanceRecord } from "../../types";
+import { EventStage, Stage, getGroupStage } from "../utils/stages";
 
 export const signMediaUrl = async (path?: string | null): Promise<string> => {
   if (!path) return "";
@@ -49,7 +50,7 @@ export const loadGroupsAndLinks = async (): Promise<{
   try {
     const { data: groupsData, error: groupsErr } = await supabase
       .from("groups")
-      .select("id, name")
+      .select("id, name, stage")
       .order("name", { ascending: true });
 
     if (groupsErr) throw groupsErr;
@@ -63,6 +64,8 @@ export const loadGroupsAndLinks = async (): Promise<{
     groupsMapped = (groupsData ?? []).map((group) => ({
       id: group.id,
       name: group.name,
+      // Columna generada en la BD; el fallback cubre cachés antiguas sin ella.
+      stage: (group.stage as Stage | null) ?? getGroupStage(group.name),
       catechistIds: [],
     }));
 
@@ -79,7 +82,10 @@ export const loadGroupsAndLinks = async (): Promise<{
     const cachedGroups = await getOfflineData<Group[]>("groups");
     const cachedLinks = await getOfflineData<GroupCatechistLink[]>("groupCatechistLinks");
 
-    groupsMapped = cachedGroups?.data ?? [];
+    groupsMapped = (cachedGroups?.data ?? []).map((g) => ({
+      ...g,
+      stage: g.stage ?? getGroupStage(g.name),
+    }));
     links = cachedLinks?.data ?? [];
   }
 
@@ -95,7 +101,7 @@ export const loadProfiles = async (): Promise<User[]> => {
   try {
     const { data: profData, error: profErr } = await supabase
       .from("profiles")
-      .select("id, name, email, role, birth_date, photo_path")
+      .select("id, name, email, role, stage, birth_date, photo_path")
       .order("name", { ascending: true });
 
     if (profErr) throw profErr;
@@ -106,6 +112,7 @@ export const loadProfiles = async (): Promise<User[]> => {
         name: profile.name ?? "",
         email: profile.email ?? "",
         role: profile.role,
+        stage: (profile.stage as Stage | null) ?? null,
         birthDate: profile.birth_date ? String(profile.birth_date).slice(0, 10) : "",
         photo: await signMediaUrl(profile.photo_path),
         attendanceHistory: [],
@@ -126,9 +133,10 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
   let eventsMapped: ParishEvent[] = [];
 
   try {
+    // RLS ya devuelve solo los eventos de las etapas del usuario más los de 'all'.
     const { data: eventsData, error: eventsErr } = await supabase
       .from("parish_events")
-      .select("id, title, date")
+      .select("id, title, date, stage")
       .order("date", { ascending: true });
 
     if (eventsErr) throw eventsErr;
@@ -137,6 +145,7 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
       id: e.id,
       title: e.title,
       date: String(e.date),
+      stage: ((e.stage as EventStage | null) ?? "all"),
     }));
 
     await saveOfflineData("parishEvents", eventsMapped);
@@ -144,7 +153,8 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
     console.warn("No se pudieron cargar eventos desde Supabase, intentando offline", error);
 
     const cached = await getOfflineData<ParishEvent[]>("parishEvents");
-    eventsMapped = cached?.data ?? [];
+    // Cachés anteriores a las etapas no traen stage: eran eventos para todos.
+    eventsMapped = (cached?.data ?? []).map((e) => ({ ...e, stage: e.stage ?? "all" }));
   }
 
   return eventsMapped;

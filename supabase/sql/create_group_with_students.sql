@@ -6,7 +6,9 @@
 -- Así nunca queda un grupo vacío huérfano de una importación a medias.
 --
 -- La llama el cliente directamente (RPC). Es SECURITY DEFINER, así que
--- comprueba por su cuenta que quien la invoca es coordinator.
+-- comprueba por su cuenta que quien la invoca es coordinator y, si es un
+-- coordinador de etapa, que el grupo y los catequistas son de su etapa
+-- (ver stages.sql).
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.create_group_with_students(
@@ -51,6 +53,12 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'El nombre debe empezar por "1º PRECONFIRMACIÓN", "2º PRECONFIRMACIÓN", "1º CONFIRMACIÓN" o "2º CONFIRMACIÓN". Recibido: "%".', v_name
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- Un coordinador de etapa solo crea grupos de su etapa. El global, de las dos.
+  IF NOT public.can_access_stage(public.group_stage(v_name)) THEN
+    RAISE EXCEPTION 'Solo puedes crear grupos de tu etapa. Recibido: "%".', v_name
+      USING ERRCODE = 'insufficient_privilege';
   END IF;
 
   -- Comparación sin distinguir mayúsculas para no acabar con "(A)" y "(a)".
@@ -125,6 +133,17 @@ BEGIN
   IF v_bad_catechist > 0 THEN
     RAISE EXCEPTION 'Alguno de los catequistas seleccionados no existe.'
       USING ERRCODE = 'foreign_key_violation';
+  END IF;
+
+  -- Y tienen que ser gente que el coordinador pueda ver (los de su etapa o los
+  -- globales). Un coordinador de etapa no puede colar a alguien de la otra.
+  SELECT count(*) INTO v_bad_catechist
+  FROM unnest(p_catechist_ids) AS cid
+  WHERE NOT public.can_see_profile(cid);
+
+  IF v_bad_catechist > 0 THEN
+    RAISE EXCEPTION 'Alguno de los catequistas seleccionados no es de tu etapa.'
+      USING ERRCODE = 'insufficient_privilege';
   END IF;
 
   -- ------------------------------------------------------------- creación

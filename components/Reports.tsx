@@ -22,6 +22,7 @@ import {
   AttendanceStatus,
 } from "../types";
 import { AcademicYear, getAcademicYearCutoff } from "../src/utils/academicYear";
+import { EventStage, STAGE_LABELS, eventAppliesToStages } from "../src/utils/stages";
 
 interface ReportsProps {
   students: Student[];
@@ -151,12 +152,20 @@ const Reports: React.FC<ReportsProps> = ({
     return users.filter((u) => u.role === "catechist");
   }, [users]);
 
+  // Los informes "todos / equipo" de un coordinador de etapa son solo de su
+  // etapa y se guardan con esa stage; los de grupo llevan 'all' porque el grupo
+  // ya es de una etapa concreta. Tiene que coincidir con generate-monthly-report.
+  const reportStage: EventStage =
+    target.scope === "group" ? "all" : (currentUser.stage ?? "all");
+
+  const stageSuffix = currentUser.stage ? ` · ${STAGE_LABELS[currentUser.stage]}` : "";
+
   const targetLabel = useMemo(() => {
-    if (target.scope === "all_students") return "Todos los niños";
-    if (target.scope === "all_catechists") return "Equipo de catequistas";
+    if (target.scope === "all_students") return `Todos los niños${stageSuffix}`;
+    if (target.scope === "all_catechists") return `Equipo de catequistas${stageSuffix}`;
     const gname = groups.find((g) => g.id === target.scopeId)?.name;
     return gname ? `Grupo ${gname}` : "Grupo";
-  }, [target, groups]);
+  }, [target, groups, stageSuffix]);
 
   // --- Cargar informe existente del mes (si existe, bloquear generación) ---
   const loadExisting = async () => {
@@ -177,6 +186,7 @@ const Reports: React.FC<ReportsProps> = ({
         .select("*")
         .eq("month", month)
         .eq("scope", scope)
+        .eq("stage", reportStage)
         .eq("report_type", reportType);
 
       if (scopeId) q = q.eq("scope_id", scopeId);
@@ -290,6 +300,9 @@ const Reports: React.FC<ReportsProps> = ({
 
           const eventDateValues = pastEvents
             .map((e) => {
+              // Un evento de la otra etapa no le afecta: ni presente ni ausente.
+              if (!eventAppliesToStages(e, c.stages ?? [])) return "-";
+
               const record = c.attendanceHistory?.find(
                 (h: any) => h.refId === e.id && h.type === "event"
               );

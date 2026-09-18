@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Group, Student, User } from '../types';
 import { isPromotionMonth } from '../src/utils/coursePromotion';
+import { Stage } from '../src/utils/stages';
 import { ImportedStudent } from '../src/utils/studentImport';
 import PromoteYearDialog from './PromoteYearDialog';
 import ImportGroupDialog from './ImportGroupDialog';
@@ -26,6 +27,16 @@ interface GroupManagerProps {
   isOnline: boolean;
   /** Fecha de la última promoción del curso en marcha, o null si no se ha hecho. */
   lastPromotionAt: string | null;
+  /**
+   * Solo el coordinador global promociona el curso: afecta a los grupos de
+   * las dos etapas a la vez.
+   */
+  canPromote: boolean;
+  /**
+   * Etapa del coordinador, o null si es global. Un coordinador de etapa solo
+   * puede crear grupos de la suya.
+   */
+  importStage: Stage | null;
   onUpdateGroup: (g: Group) => void;
   onUpdateStudent: (s: Student) => void;
   onAssignCatechist: (
@@ -48,6 +59,8 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   classDays,
   isOnline,
   lastPromotionAt,
+  canPromote: canPromoteRole,
+  importStage,
   onUpdateGroup,
   onUpdateStudent,
   onAssignCatechist,
@@ -134,9 +147,11 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   // de entrada del curso nuevo, permitiendo promocionar dos veces.
   const inPromotionWindow = isPromotionMonth();
   const alreadyPromoted = lastPromotionAt !== null;
-  const canPromote = inPromotionWindow && !alreadyPromoted && isOnline;
+  const canPromote = canPromoteRole && inPromotionWindow && !alreadyPromoted && isOnline;
 
-  const promoteBlockedReason = !inPromotionWindow
+  const promoteBlockedReason = !canPromoteRole
+    ? 'Solo el coordinador global puede promocionar el curso: afecta a las dos etapas.'
+    : !inPromotionWindow
     ? 'Solo se puede promocionar en agosto, septiembre u octubre.'
     : alreadyPromoted
     ? `Ya se promocionó el ${new Date(lastPromotionAt!).toLocaleDateString('es-ES', {
@@ -182,6 +197,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
         <ImportGroupDialog
           groups={groups}
           catechists={catechists}
+          allowedStage={importStage}
           onClose={() => setShowImportDialog(false)}
           onCreate={async (name, catechistIds, importedStudents) => {
             await onCreateGroupWithStudents(name, catechistIds, importedStudents);

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { User, Group, CatechistAttendanceRecord, AttendanceStatus, ParishEvent, calculateCatechistRate } from '../types';
 import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import { getEventsForUser } from '../src/utils/stages';
 
 interface CatechistManagerProps {
   users: User[];
@@ -86,12 +87,15 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     return "absent";
   };
 
-  const loadFullHistoryFromDB = async (userId: string) => {
+  const loadFullHistoryFromDB = async (user: User) => {
+    const userId = user.id;
     const end = getAcademicYearCutoff(academicYear);
 
-    // Días lectivos y eventos relevantes (solo pasado)
+    // Días lectivos y eventos relevantes (solo pasado). De los eventos, solo
+    // los de las etapas del catequista (más los de 'all'): los de la otra
+    // etapa no le afectan y no deben aparecer como ausencias.
     const relevantClassDays = classDays.filter(d => d >= academicYear.start && d <= end);
-    const relevantEvents = events.filter(e => e.date >= academicYear.start && e.date <= end);
+    const relevantEvents = getEventsForUser(events, user).filter(e => e.date >= academicYear.start && e.date <= end);
 
     // 1) Clases (catechist_attendance)
     const { data: classRows, error: classErr } = await supabase
@@ -184,7 +188,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
 
     setIsLoadingHistory(true);
     try {
-      const full = await loadFullHistoryFromDB(user.id);
+      const full = await loadFullHistoryFromDB(user);
       setTempHistory(full);
     } catch (e: any) {
       alert("Error cargando histórico: " + (e?.message ?? String(e)));

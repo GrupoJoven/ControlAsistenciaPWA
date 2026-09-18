@@ -13,6 +13,7 @@ import {
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Student, calculateAttendanceWeight, ParishEvent, calculateStudentRate, getTodayStr, AttendanceRecord } from '../types';
 import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import { STAGE_LABELS } from '../src/utils/stages';
 
 interface DashboardProps {
   students: Student[];
@@ -229,6 +230,12 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
+                    {/* Los de 'all' no se etiquetan: son los normales. */}
+                    {event.stage !== 'all' && (
+                      <span className="ml-2 px-2 py-0.5 rounded-full bg-white text-[10px] font-bold uppercase tracking-wide text-indigo-600">
+                        {STAGE_LABELS[event.stage]}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>

@@ -9,6 +9,7 @@ import {
   Clock,
 } from "lucide-react";
 import { User, ParishEvent, AttendanceStatus, getTodayStr } from "../types";
+import { STAGE_LABELS, eventAppliesToStages } from "../src/utils/stages";
 
 interface CatechistAttendanceProps {
   users: User[];
@@ -95,6 +96,15 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   const canShowTable =
     (mode === "class" && isClassDay) || (mode === "event" && selectedEventId);
 
+  // En un evento de una sola etapa solo se pasa lista a la gente de esa etapa:
+  // a un catequista de preconfirmación no se le apunta falta en un evento de
+  // confirmación. En días lectivos y eventos de 'all' salen todos.
+  const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
+  const visibleUsers =
+    mode === "event" && selectedEvent
+      ? users.filter((u) => eventAppliesToStages(selectedEvent, u.stages ?? []))
+      : users;
+
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-500">
       <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -130,7 +140,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
             <option value="">Selecciona evento...</option>
             {events.map((e) => (
               <option key={e.id} value={e.id}>
-                {e.title} ({e.date})
+                {e.title} ({e.date}){e.stage !== "all" ? ` · ${STAGE_LABELS[e.stage]}` : ""}
               </option>
             ))}
           </select>
@@ -173,7 +183,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
             </thead>
 
             <tbody className="divide-y divide-slate-50">
-              {users.map((user) => {
+              {visibleUsers.map((user) => {
                 if (mode === "class") {
                   const row = classByUser.get(user.id) ?? {
                     catechism: "absent",

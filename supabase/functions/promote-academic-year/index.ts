@@ -89,7 +89,7 @@ serve(async (req) => {
 
   const { data: profile, error: profileErr } = await admin
     .from("profiles")
-    .select("id, role, name")
+    .select("id, role, stage, name")
     .eq("id", authData.user.id)
     .maybeSingle();
 
@@ -97,8 +97,10 @@ serve(async (req) => {
 
   // El rol se comprueba en servidor: ocultar el botón en el cliente no es una
   // medida de seguridad, cualquiera puede llamar al endpoint directamente.
-  if (profile?.role !== "coordinator") {
-    return json({ error: "Solo un coordinador puede promocionar el curso." }, 403);
+  // Solo el coordinador GLOBAL (sin etapa): la promoción renombra y da de baja
+  // grupos de las dos etapas a la vez.
+  if (profile?.role !== "coordinator" || profile?.stage) {
+    return json({ error: "Solo el coordinador global puede promocionar el curso." }, 403);
   }
 
   let dryRun = false;

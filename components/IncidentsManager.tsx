@@ -4,6 +4,7 @@ import { supabase } from "../src/lib/supabaseClient";
 import { Plus, Trash2, Filter, X, AlertTriangle } from "lucide-react";
 import { Group, Student, User } from "../types";
 import { saveOfflineData, getOfflineData } from "../src/utils/offlineStorage";
+import { isGlobalCoordinator } from "../src/utils/stages";
 
 type GroupCatechistLink = { group_id: string; profile_id: string };
 
@@ -273,6 +274,23 @@ const IncidentsManager: React.FC<Props> = ({
     setIsCreateOpen(true);
   };
 
+  // Coordinadores a los que avisar de una incidencia de un grupo: los globales
+  // y los de la etapa del grupo. Al de la otra etapa no le incumbe.
+  const getCoordinatorIdsForGroup = (groupId: string): string[] => {
+    const groupStage = groups.find((g) => g.id === groupId)?.stage ?? null;
+
+    const ids = users
+      .filter((u) => u.role === "coordinator")
+      .filter(
+        (u) =>
+          isGlobalCoordinator(u) ||
+          (groupStage !== null && (u.stages ?? []).includes(groupStage))
+      )
+      .map((u) => u.id);
+
+    return Array.from(new Set<string>(ids));
+  };
+
   const sendIncidentPushNotifications = async (studentId: string) => {
     const student = studentsById.get(studentId);
     const incidentGroupId = student?.groupId;
@@ -290,13 +308,7 @@ const IncidentsManager: React.FC<Props> = ({
       ),
     ];
 
-    const coordinatorIds = [
-      ...new Set(
-        users
-          .filter((u) => u.role === "coordinator")
-          .map((u) => u.id)
-      ),
-    ];
+    const coordinatorIds = getCoordinatorIdsForGroup(incidentGroupId);
 
     // Prioridad: si el coordinador pertenece al grupo del participante,
     // entra en "tu grupo" y NO debe recibir también la de "otro grupo".
@@ -379,13 +391,7 @@ const IncidentsManager: React.FC<Props> = ({
       ),
     ];
 
-    const coordinatorIds = [
-      ...new Set(
-        users
-          .filter((u) => u.role === "coordinator")
-          .map((u) => u.id)
-      ),
-    ];
+    const coordinatorIds = getCoordinatorIdsForGroup(incidentGroupId);
 
     const recipientsMyGroup = groupLinkedProfileIds;
     const recipientsOtherGroup = coordinatorIds.filter(

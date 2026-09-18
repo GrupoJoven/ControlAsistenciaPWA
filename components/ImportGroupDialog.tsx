@@ -18,6 +18,7 @@ import {
   parseStudentFile,
 } from "../src/utils/studentImport";
 import { downloadCsv } from "../src/utils/exportAttendance";
+import { Stage, getGroupStage } from "../src/utils/stages";
 
 /** Prefijos admitidos. Deben coincidir con los de create_group_with_students(). */
 const VALID_PREFIXES = [
@@ -30,6 +31,8 @@ const VALID_PREFIXES = [
 interface ImportGroupDialogProps {
   groups: Group[];
   catechists: User[];
+  /** Etapa a la que se limita el coordinador, o null si puede crear de las dos. */
+  allowedStage: Stage | null;
   onClose: () => void;
   onCreate: (
     name: string,
@@ -41,9 +44,20 @@ interface ImportGroupDialogProps {
 const ImportGroupDialog: React.FC<ImportGroupDialogProps> = ({
   groups,
   catechists,
+  allowedStage,
   onClose,
   onCreate,
 }) => {
+  // Un coordinador de etapa solo ve los prefijos de la suya. La RPC vuelve a
+  // comprobarlo en el servidor.
+  const validPrefixes = useMemo(
+    () =>
+      allowedStage
+        ? VALID_PREFIXES.filter((prefix) => getGroupStage(prefix) === allowedStage)
+        : VALID_PREFIXES,
+    [allowedStage]
+  );
+
   const [name, setName] = useState("");
   const [selectedCatechistIds, setSelectedCatechistIds] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -58,8 +72,8 @@ const ImportGroupDialog: React.FC<ImportGroupDialogProps> = ({
   const nameError = useMemo(() => {
     if (trimmedName === "") return null; // Todavía no ha escrito nada: no se regaña.
 
-    if (!VALID_PREFIXES.some((prefix) => trimmedName.startsWith(prefix))) {
-      return `Debe empezar por ${VALID_PREFIXES.join(", ")}.`;
+    if (!validPrefixes.some((prefix) => trimmedName.startsWith(prefix))) {
+      return `Debe empezar por ${validPrefixes.join(", ")}.`;
     }
 
     const exists = groups.some(
@@ -68,7 +82,7 @@ const ImportGroupDialog: React.FC<ImportGroupDialogProps> = ({
     if (exists) return "Ya existe un grupo con ese nombre.";
 
     return null;
-  }, [trimmedName, groups]);
+  }, [trimmedName, groups, validPrefixes]);
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
@@ -147,7 +161,7 @@ const ImportGroupDialog: React.FC<ImportGroupDialogProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="1º PRECONFIRMACIÓN (A)"
+              placeholder={`${validPrefixes[0]} (A)`}
               className={`mt-2 w-full px-4 py-3 border rounded-2xl text-sm font-semibold outline-none focus:ring-2 ${
                 nameError
                   ? "border-red-300 focus:ring-red-400"

@@ -1,16 +1,30 @@
 import React, { useState } from "react";
-import { Calendar, Plus } from "lucide-react";
-import { ParishEvent } from "../types";
+import { Calendar, Lock, Plus } from "lucide-react";
+import { ParishEvent, User } from "../types";
+import {
+  EventStage,
+  STAGE_LABELS,
+  canManageEventStage,
+  isGlobalCoordinator,
+} from "../src/utils/stages";
 
 interface AgendaManagerProps {
+  currentUser: User;
   events: ParishEvent[];
-  onAdd: (e: { title: string; date: string }) => void;
+  onAdd: (e: { title: string; date: string; stage: EventStage }) => void;
   onRemove: (id: string) => void;
 }
 
-const AgendaManager: React.FC<AgendaManagerProps> = ({ events, onAdd, onRemove }) => {
+const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAdd, onRemove }) => {
+  const isGlobal = isGlobalCoordinator(currentUser);
+
+  // El coordinador global elige a quién afecta el evento; el de etapa solo
+  // puede crear eventos de la suya (RLS lo impone igualmente).
+  const fixedStage: EventStage | null = isGlobal ? null : (currentUser.stage ?? null);
+
   const [newTitle, setNewTitle] = useState("");
   const [newDateTime, setNewDateTime] = useState("");
+  const [newStage, setNewStage] = useState<EventStage>(fixedStage ?? "all");
   const [eventToDelete, setEventToDelete] = useState<ParishEvent | null>(null);
 
   const handleAdd = () => {
@@ -19,6 +33,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ events, onAdd, onRemove }
     onAdd({
       title: newTitle,
       date: newDateTime,
+      stage: fixedStage ?? newStage,
     });
 
     setNewTitle("");
@@ -76,28 +91,53 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ events, onAdd, onRemove }
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
 
-          <div className="flex flex-col sm:flex-row gap-4">
+          {/* Dos filas: con el selector de etapa, título + fecha + etapa + botón
+              no caben en una sola dentro de max-w-2xl y el botón se salía. */}
+          <div className="flex flex-col gap-4">
             <input
               type="text"
               placeholder="Título"
-              className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
             />
 
-            <input
-              type="datetime-local"
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl w-full sm:w-auto max-w-[300px] sm:max-w-full"
-              value={newDateTime}
-              onChange={(e) => setNewDateTime(e.target.value)}
-            />
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4">
+              <input
+                type="datetime-local"
+                className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl w-full sm:w-auto max-w-[300px] sm:max-w-full"
+                value={newDateTime}
+                onChange={(e) => setNewDateTime(e.target.value)}
+              />
 
-            <button
-              onClick={handleAdd}
-              className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center"
-            >
-              <Plus size={24} />
-            </button>
+              {fixedStage ? (
+                <div
+                  className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-600 flex items-center gap-2 w-full sm:w-auto sm:flex-1"
+                  title="Solo puedes crear eventos de tu etapa"
+                >
+                  <Lock size={14} className="text-slate-400 shrink-0" />
+                  {STAGE_LABELS[fixedStage]}
+                </div>
+              ) : (
+                <select
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1"
+                  value={newStage}
+                  onChange={(e) => setNewStage(e.target.value as EventStage)}
+                  title="¿A quién afecta el evento?"
+                >
+                  <option value="all">{STAGE_LABELS.all}</option>
+                  <option value="preconfirmation">{STAGE_LABELS.preconfirmation}</option>
+                  <option value="confirmation">{STAGE_LABELS.confirmation}</option>
+                </select>
+              )}
+
+              <button
+                onClick={handleAdd}
+                className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0"
+              >
+                <Plus size={24} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -127,16 +167,35 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ events, onAdd, onRemove }
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                      <span
+                        className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                          event.stage === "all"
+                            ? "bg-slate-100 text-slate-500"
+                            : "bg-indigo-50 text-indigo-600"
+                        }`}
+                      >
+                        {STAGE_LABELS[event.stage]}
+                      </span>
                     </p>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setEventToDelete(event)}
-                  className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                >
-                  <Plus size={18} className="rotate-45" />
-                </button>
+                {/* Un coordinador de etapa no borra los eventos de 'ambas etapas'. */}
+                {canManageEventStage(currentUser, event.stage) ? (
+                  <button
+                    onClick={() => setEventToDelete(event)}
+                    className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                  >
+                    <Plus size={18} className="rotate-45" />
+                  </button>
+                ) : (
+                  <span
+                    className="p-2 text-slate-200"
+                    title="Este evento lo gestiona el coordinador global"
+                  >
+                    <Lock size={16} />
+                  </span>
+                )}
               </div>
             ))}
           </div>
