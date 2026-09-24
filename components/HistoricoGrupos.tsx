@@ -1,10 +1,29 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, CalendarDays, ChevronLeft, FolderOpen } from "lucide-react";
-import { Group, Student } from "../types";
-import { getTodayStr } from "../types";
+import { AttendanceRecord, Group, Student } from "../types";
+import { calculateAttendanceWeight, getTodayStr } from "../types";
 import { AcademicYear } from "../src/utils/academicYear";
 import Historial from "./Historial";
 import AttendanceDownloadButton from "./AttendanceDownloadButton";
+
+interface GroupStats {
+  studentsCount: number;
+  /** Días lectivos pasados en los que nadie del grupo tiene participación. */
+  suspiciousCount: number;
+  /**
+   * Participación media del grupo (0-100), con los mismos pesos que el
+   * porcentaje de cada alumno. null si todavía no hay días con datos.
+   */
+  averageRate: number | null;
+  /** Catecúmenos que acuden de media cada día lectivo. null si no hay datos. */
+  averagePerDay: number | null;
+}
+
+const rateColor = (rate: number) =>
+  rate > 80 ? "text-green-600" : rate > 50 ? "text-amber-600" : "text-red-600";
+
+const rateBarColor = (rate: number) =>
+  rate > 80 ? "bg-green-500" : rate > 50 ? "bg-amber-500" : "bg-red-500";
 
 interface HistoricoGruposProps {
   groups: Group[];
@@ -39,9 +58,9 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   const todayRaw = getTodayStr();
-  const hasParticipationOnDay = (student: Student, day: string) => {
-    const record = student.attendanceHistory?.find((record) => record.date === day);
-
+  const hasParticipation = (
+    record: AttendanceRecord | undefined
+  ): record is AttendanceRecord => {
     if (!record) return false;
 
     const catechismParticipated =
@@ -59,36 +78,75 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
     );
   }, [groups]);
 
-  const suspiciousCountByGroup = useMemo(() => {
-    const historicalDays = classDays
-      .filter((day) => day < todayRaw)
-      .sort((a, b) => b.localeCompare(a));
+  const studentsByGroup = useMemo(() => {
+    const result = new Map<string, Student[]>();
 
-    const result = new Map<string, number>();
-
-    for (const group of sortedGroups) {
-      const groupStudents = students.filter((student) => student.groupId === group.id);
-
-      if (groupStudents.length === 0) {
-        result.set(group.id, 0);
-        continue;
-      }
-
-      let suspiciousCount = 0;
-
-      for (const day of historicalDays) {
-        const isSuspicious = groupStudents.every(
-          (student) => !hasParticipationOnDay(student, day)
-        );
-
-        if (isSuspicious) suspiciousCount += 1;
-      }
-
-      result.set(group.id, suspiciousCount);
+    for (const student of students) {
+      const list = result.get(student.groupId) ?? [];
+      list.push(student);
+      result.set(student.groupId, list);
     }
 
     return result;
-  }, [groups, students, classDays, todayRaw, sortedGroups]);
+  }, [students]);
+
+  /**
+   * Los días sospechosos no cuentan para las medias: casi siempre son días en
+   * los que no se pasó lista, y contarlos como 0 hundiría la previsión.
+   */
+  const statsByGroup = useMemo(() => {
+    const historicalDays = classDays.filter((day) => day < todayRaw);
+    const result = new Map<string, GroupStats>();
+
+    for (const group of sortedGroups) {
+      const groupStudents = studentsByGroup.get(group.id) ?? [];
+      const recordsByStudent = groupStudents.map(
+        (student) =>
+          new Map((student.attendanceHistory ?? []).map((record) => [record.date, record]))
+      );
+
+      let suspiciousCount = 0;
+      let countedDays = 0;
+      let totalWeight = 0;
+      let totalAttendees = 0;
+
+      if (groupStudents.length > 0) {
+        for (const day of historicalDays) {
+          let dayWeight = 0;
+          let dayAttendees = 0;
+
+          for (const records of recordsByStudent) {
+            const record = records.get(day);
+            if (!hasParticipation(record)) continue;
+
+            dayAttendees += 1;
+            dayWeight += calculateAttendanceWeight(record);
+          }
+
+          if (dayAttendees === 0) {
+            suspiciousCount += 1;
+            continue;
+          }
+
+          countedDays += 1;
+          totalWeight += dayWeight;
+          totalAttendees += dayAttendees;
+        }
+      }
+
+      result.set(group.id, {
+        studentsCount: groupStudents.length,
+        suspiciousCount,
+        averageRate:
+          countedDays > 0
+            ? Math.round((totalWeight / (groupStudents.length * countedDays)) * 100)
+            : null,
+        averagePerDay: countedDays > 0 ? totalAttendees / countedDays : null,
+      });
+    }
+
+    return result;
+  }, [studentsByGroup, classDays, todayRaw, sortedGroups]);
 
   const selectedGroup = useMemo(() => {
     return groups.find((group) => group.id === selectedGroupId) ?? null;
@@ -132,8 +190,8 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
               Histórico grupos
             </h2>
             <p className="text-amber-50/90 text-xs lg:text-sm mt-1">
-              Accede al histórico de cualquier grupo y detecta los días sin
-              participación registrada.
+              Accede al histórico de cualquier grupo, consulta su asistencia
+              media y detecta los días sin participación registrada.
             </p>
           </div>
 
@@ -170,14 +228,19 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {sortedGroups.map((group) => {
-            const suspiciousCount = suspiciousCountByGroup.get(group.id) ?? 0;
-            const groupStudentsCount = students.filter(
-              (student) => student.groupId === group.id
-            ).length;
+            const {
+              studentsCount: groupStudentsCount,
+              suspiciousCount,
+              averageRate,
+              averagePerDay,
+            } = statsByGroup.get(group.id) ?? {
+              studentsCount: 0,
+              suspiciousCount: 0,
+              averageRate: null,
+              averagePerDay: null,
+            };
 
-            const groupStudents = students.filter(
-              (student) => student.groupId === group.id
-            );
+            const groupStudents = studentsByGroup.get(group.id) ?? [];
 
             return (
               <div
@@ -201,6 +264,70 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
                     {groupStudentsCount} catecúmeno
                     {groupStudentsCount === 1 ? "" : "s"}
                   </p>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  {/* El valor va anclado abajo para que los dos números queden
+                      alineados aunque una etiqueta ocupe dos líneas. */}
+                  <div className="flex flex-col rounded-xl bg-slate-50 px-3 py-2.5">
+                    <p className="text-[11px] uppercase tracking-widest font-bold text-slate-400">
+                      Asistencia media
+                    </p>
+                    <div className="mt-auto pt-1">
+                      {averageRate === null ? (
+                        <p className="text-2xl font-extrabold text-slate-300">—</p>
+                      ) : (
+                        <p className={`text-2xl font-extrabold ${rateColor(averageRate)}`}>
+                          {averageRate}%
+                        </p>
+                      )}
+                      <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        {averageRate !== null && (
+                          <div
+                            className={`h-full rounded-full ${rateBarColor(averageRate)}`}
+                            style={{ width: `${averageRate}%` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="flex flex-col rounded-xl bg-slate-50 px-3 py-2.5"
+                    title={
+                      averagePerDay === null
+                        ? undefined
+                        : `${averagePerDay.toLocaleString("es-ES", {
+                            maximumFractionDigits: 1,
+                          })} catecúmenos de media por domingo`
+                    }
+                  >
+                    <p className="text-[11px] uppercase tracking-widest font-bold text-slate-400">
+                      Por domingo
+                    </p>
+                    <div className="mt-auto pt-1">
+                      {averagePerDay === null ? (
+                        <p className="text-2xl font-extrabold text-slate-300">—</p>
+                      ) : (
+                        <p className="text-2xl font-extrabold text-slate-900">
+                          {Math.round(averagePerDay)}
+                          <span className="text-xs font-bold text-slate-400 ml-1">
+                            de {groupStudentsCount}
+                          </span>
+                        </p>
+                      )}
+                      <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        {averagePerDay !== null && (
+                          <div
+                            className="h-full rounded-full bg-slate-400"
+                            style={{
+                              width: `${(averagePerDay / groupStudentsCount) * 100}%`,
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-3">
