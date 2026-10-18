@@ -51,6 +51,7 @@ import GroupManager from './components/GroupManager';
 import ClassDayManager from './components/ClassDayManager';
 import CatechistManager from './components/CatechistManager';
 import CatechistAttendance from './components/CatechistAttendance';
+import FamilyContact from './components/FamilyContact';
 import ServicesManagement from './components/ServicesManagement';
 import SchoolCalendar from "./components/SchoolCalendar";
 import BirthdayPopup from './components/BirthdayPopup';
@@ -1830,6 +1831,14 @@ const App: React.FC = () => {
           )}
 
           {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={usersWithStages.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={academicYearEvents} classDays={academicYearClassDays} onUpdate={updateCatechistAttendance} />}
+          {currentView === 'family-contact' && currentUser.role === 'coordinator' && (
+            <FamilyContact
+              currentUser={currentUser}
+              groups={groups}
+              students={students}
+              isOnline={isOnline}
+            />
+          )}
           {currentView === 'coordinator-edit-groups' && (
             <GroupManager
               groups={groupsWithCatechists}

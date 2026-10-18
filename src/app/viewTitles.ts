@@ -12,6 +12,7 @@ export const VIEW_TITLES: Record<View, string> = {
   "coordinator-groups": "Gestión Integral de Niños",
   catechists: "Registro de Catequistas",
   "catechist-attendance": "Asistencia del Equipo",
+  "family-contact": "Contactar familias",
   "coordinator-edit-groups": "Administración de Grupos",
   agenda: "Planificador de Eventos",
   reports: "Informes pastorales con IA",
