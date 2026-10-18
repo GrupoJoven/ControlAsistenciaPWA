@@ -476,22 +476,48 @@ const App: React.FC = () => {
     setClassDays(classDaysMapped);
 
     // --- catechist_attendance + users final ---
-    const today = getTodayStr();
     let usersWithAttendance: User[] = [];
 
     try {
-      const { data: catClassData, error: catClassErr } = await supabase
-        .from("v_catechist_attendance_norm")
-        .select("profile_id, date, catechism, mass");
+      // Supabase devuelve como máximo 1000 filas por consulta, así que se pagina
+      // igual que en loadAttendance: si no, el histórico quedaría cortado.
+      const fetchAllRows = async (table: string, columns: string, orderBy: string[]) => {
+        let all: any[] = [];
+        let from = 0;
+        const pageSize = 1000;
 
-      if (catClassErr) throw catClassErr;
+        while (true) {
+          let query = supabase.from(table).select(columns);
+          for (const col of orderBy) query = query.order(col, { ascending: true });
 
-      const { data: catEventData, error: catEventErr } = await supabase
-        .from("catechist_attendance_events")
-        .select("profile_id, event_id, date, status")
-        .eq("date", today);
+          const { data, error } = await query.range(from, from + pageSize - 1);
 
-      if (catEventErr) throw catEventErr;
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+
+          all = all.concat(data);
+          if (data.length < pageSize) break;
+
+          from += pageSize;
+        }
+
+        return all;
+      };
+
+      const catClassData = await fetchAllRows(
+        "v_catechist_attendance_norm",
+        "profile_id, date, catechism, mass",
+        ["profile_id", "date"]
+      );
+
+      // Se cargan TODOS los registros de eventos, no solo los de hoy: el pase de
+      // lista de un evento de la agenda (y el % de asistencia) necesita los de
+      // cualquier fecha, o al refrescar parecería que nadie asistió.
+      const catEventData = await fetchAllRows(
+        "catechist_attendance_events",
+        "profile_id, event_id, date, status",
+        ["profile_id", "event_id", "date"]
+      );
 
       const catAttendanceByProfile = new Map<string, CatechistAttendanceRecord[]>();
 
