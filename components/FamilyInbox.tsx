@@ -8,7 +8,10 @@ import {
   ChevronRight,
   Image as ImageIcon,
   Inbox,
+  Info,
+  Layers,
   Loader2,
+  LucideIcon,
   Mail,
   MailOpen,
   Paperclip,
@@ -18,6 +21,8 @@ import {
   Send,
   ShieldCheck,
   SquarePen,
+  Tag,
+  Users,
   X,
 } from "lucide-react";
 import { supabase } from "../src/lib/supabaseClient";
@@ -67,6 +72,18 @@ interface FamilyInboxProps {
 
 type Folder = "inbox" | "sent";
 
+/** Pestañas de Recibidos, como en Gmail. Deben coincidir con CATEGORIES en family-inbox/mailbox.ts. */
+type Category = "primary" | "social" | "promotions" | "updates";
+type InboxTab = Category | "all";
+
+const INBOX_TABS: { key: InboxTab; label: string; icon: LucideIcon }[] = [
+  { key: "primary", label: "Principal", icon: Inbox },
+  { key: "social", label: "Social", icon: Users },
+  { key: "promotions", label: "Promociones", icon: Tag },
+  { key: "updates", label: "Notificaciones", icon: Info },
+  { key: "all", label: "Todas las bandejas", icon: Layers },
+];
+
 type Address = { name: string; address: string };
 
 type MessageSummary = {
@@ -85,6 +102,8 @@ type ListResult = {
   page: number;
   page_size: number;
   unseen: number | null;
+  /** Solo llega en la primera página de Recibidos sin búsqueda; null si el servidor no es Gmail. */
+  unseen_by_category?: Record<Category, number> | null;
   messages: MessageSummary[];
 };
 
@@ -304,12 +323,14 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
   const [page, setPage] = useState(0);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
-  // Solo en Recibidos: en Enviados se ignora.
+  // Solo en Recibidos: en Enviados se ignoran.
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [inboxTab, setInboxTab] = useState<InboxTab>("primary");
   const [reloadKey, setReloadKey] = useState(0);
 
   const [list, setList] = useState<ListResult | null>(null);
   const [inboxUnseen, setInboxUnseen] = useState<number | null>(null);
+  const [tabUnseen, setTabUnseen] = useState<Record<Category, number> | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -358,11 +379,21 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setIsListLoading(true);
     setListError(null);
 
-    invokeInbox({ action: "list", folder, page, query, unread: folder === "inbox" && unreadOnly })
+    invokeInbox({
+      action: "list",
+      folder,
+      page,
+      query,
+      unread: folder === "inbox" && unreadOnly,
+      // Al buscar, la función busca en todas las pestañas, como Gmail.
+      category: folder === "inbox" && inboxTab !== "all" ? inboxTab : undefined,
+    })
       .then((data) => {
         if (requestId !== listRequest.current) return;
-        setList(data as ListResult);
-        if (folder === "inbox") setInboxUnseen((data as ListResult).unseen);
+        const result = data as ListResult;
+        setList(result);
+        if (folder === "inbox") setInboxUnseen(result.unseen);
+        if (result.unseen_by_category !== undefined) setTabUnseen(result.unseen_by_category);
       })
       .catch((e) => {
         if (requestId !== listRequest.current) return;
@@ -372,7 +403,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
       .finally(() => {
         if (requestId === listRequest.current) setIsListLoading(false);
       });
-  }, [folder, page, query, unreadOnly, reloadKey, isOnline]);
+  }, [folder, page, query, unreadOnly, inboxTab, reloadKey, isOnline]);
 
   // Mensaje abierto
   const messageRequest = useRef(0);
@@ -401,6 +432,13 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setSentNotice(null);
     closeMessage();
     setFolder(next);
+    setPage(0);
+  };
+
+  const changeInboxTab = (next: InboxTab) => {
+    if (next === inboxTab) return;
+    closeMessage();
+    setInboxTab(next);
     setPage(0);
   };
 
@@ -447,6 +485,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
       const data = (await invokeInbox({ action: "mark", folder: messageFolder, uid, seen: !message.seen })) as {
         seen: boolean;
         unseen: number | null;
+        unseen_by_category: Record<Category, number> | null;
       };
 
       setMessage((m) => (m && m.uid === uid ? { ...m, seen: data.seen } : m));
@@ -460,6 +499,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
           : l
       );
       if (data.unseen !== null) setInboxUnseen(data.unseen);
+      if (data.unseen_by_category) setTabUnseen(data.unseen_by_category);
       // Con "Solo no leídos", la lista cambia: se recarga para cuando se vuelva a ella.
       if (unreadOnly && messageFolder === "inbox") setReloadKey((k) => k + 1);
     } catch (e) {
@@ -617,6 +657,10 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     }
   };
 
+  // Como Gmail: el contador de Recibidos es el de Principal (si el servidor da las pestañas).
+  const inboxBadge = tabUnseen ? tabUnseen.primary : inboxUnseen;
+  const currentTabLabel = INBOX_TABS.find((t) => t.key === inboxTab)?.label ?? "Recibidos";
+
   const total = list?.total ?? 0;
   const pageSize = list?.page_size ?? 25;
   const firstShown = total === 0 ? 0 : page * pageSize + 1;
@@ -671,13 +715,13 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
                   >
                     {f === "inbox" ? <Inbox size={14} /> : <Send size={14} />}
                     {f === "inbox" ? "Recibidos" : "Enviados"}
-                    {f === "inbox" && !!inboxUnseen && (
+                    {f === "inbox" && !!inboxBadge && (
                       <span
                         className={`ml-0.5 px-1.5 rounded-full text-[10px] ${
                           active ? "bg-white/20 text-white" : "bg-indigo-50 text-indigo-700"
                         }`}
                       >
-                        {inboxUnseen}
+                        {inboxBadge}
                       </span>
                     )}
                   </button>
@@ -741,21 +785,53 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
           </form>
 
           {folder === "inbox" && (
-            <button
-              type="button"
-              onClick={() => {
-                setUnreadOnly((v) => !v);
-                setPage(0);
-              }}
-              aria-pressed={unreadOnly}
-              className={`w-fit px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 ${
-                unreadOnly
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              <Mail size={14} /> Solo no leídos
-            </button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {query ? (
+                  <span className="text-xs text-slate-500">Buscando en todas las bandejas de Recibidos.</span>
+                ) : (
+                  INBOX_TABS.map(({ key, label, icon: Icon }) => {
+                    const active = inboxTab === key;
+                    const count = key === "all" ? inboxUnseen : tabUnseen?.[key];
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => changeInboxTab(key)}
+                        aria-pressed={active}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                          active
+                            ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <Icon size={14} />
+                        {label}
+                        {!!count && (
+                          <span className="px-1.5 rounded-full text-[10px] bg-indigo-600 text-white">{count}</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setUnreadOnly((v) => !v);
+                  setPage(0);
+                }}
+                aria-pressed={unreadOnly}
+                className={`w-fit px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                  unreadOnly
+                    ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                    : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <Mail size={14} /> Solo no leídos
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -797,8 +873,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
             <p className="p-6 text-sm text-slate-500">
               {query
                 ? "Ningún correo coincide con la búsqueda."
-                : folder === "inbox" && unreadOnly
-                  ? "No hay correos sin leer."
+                : folder === "inbox"
+                  ? `No hay correos ${unreadOnly ? "sin leer " : ""}en ${currentTabLabel}.`
                   : "No hay correos en esta carpeta."}
             </p>
           )}

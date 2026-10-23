@@ -5,7 +5,8 @@
 //
 // - action "list": una página de Recibidos o Enviados, con búsqueda opcional
 //   (admite lo mismo que el buscador de Gmail: palabras, from:, has:attachment...)
-//   y, en Recibidos, el filtro unread: true para ver solo los no leídos.
+//   y, en Recibidos, el filtro unread: true para ver solo los no leídos y
+//   category ("primary", "social", "promotions", "updates") para una pestaña.
 // - action "get": un mensaje con su texto, sus imágenes incrustadas y la lista
 //   de adjuntos.
 // - action "attachment": descarga un adjunto (respuesta binaria).
@@ -32,6 +33,7 @@ import {
   closeImap,
   downloadAttachment,
   getMessage,
+  isCategory,
   listMessages,
   openImap,
   prepareReply,
@@ -174,10 +176,12 @@ Deno.serve(async (req) => {
     if (action === "list") {
       const page = Number.isInteger(params.page) && params.page >= 0 ? params.page : 0;
       const query = String(params.query ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, MAX_QUERY_LENGTH);
-      // "Solo no leídos" tiene sentido en Recibidos; en Enviados se ignora.
+      // "Solo no leídos" y las pestañas tienen sentido en Recibidos; en Enviados
+      // se ignoran. Al buscar se busca en todas las pestañas, como en Gmail.
       const unread = params.unread === true && folder === "inbox";
-      const result = await listMessages(client, folder, page, query, unread);
-      return jsonResponse({ ok: true, account: account.email, folder, query, unread, ...result });
+      const category = folder === "inbox" && !query && isCategory(params.category) ? params.category : null;
+      const result = await listMessages(client, folder, page, query, unread, category);
+      return jsonResponse({ ok: true, account: account.email, folder, query, unread, category, ...result });
     }
 
     if (action === "get") {

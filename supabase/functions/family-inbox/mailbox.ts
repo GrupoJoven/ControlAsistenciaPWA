@@ -245,20 +245,46 @@ function replyRecipient(msg: FetchMessageObject, account: FamilyMailAccount): Ad
   return candidate;
 }
 
+/**
+ * Pestañas de Recibidos de Gmail (Principal, Social, Promociones,
+ * Notificaciones). Gmail no las ofrece como carpetas IMAP, pero su buscador
+ * (X-GM-RAW) entiende "category:", igual que en la web.
+ */
+export const CATEGORIES = ["primary", "social", "promotions", "updates"] as const;
+export type Category = (typeof CATEGORIES)[number];
+export const isCategory = (v: unknown): v is Category => CATEGORIES.includes(v as Category);
+
+/** No leídos de cada pestaña. Necesita Recibidos abierto; null si el servidor no es Gmail. */
+async function unseenByCategory(client: ImapFlow): Promise<Record<Category, number> | null> {
+  try {
+    const counts = {} as Record<Category, number>;
+    for (const c of CATEGORIES) {
+      const uids = await client.search({ gmraw: `category:${c}`, seen: false }, { uid: true });
+      counts[c] = Array.isArray(uids) ? uids.length : 0;
+    }
+    return counts;
+  } catch (e) {
+    console.log("unseenByCategory error", String(e));
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Acciones
 // ---------------------------------------------------------------------------
 
 /**
  * Una página de la carpeta, de más reciente a más antiguo. query es una
- * búsqueda de Gmail y unreadOnly deja solo los no leídos; se pueden combinar.
+ * búsqueda de Gmail, unreadOnly deja solo los no leídos y category, una
+ * pestaña de Recibidos; se pueden combinar.
  */
 export async function listMessages(
   client: ImapFlow,
   folder: Folder,
   page: number,
   query: string,
-  unreadOnly = false
+  unreadOnly = false,
+  category: Category | null = null
 ) {
   // El contador de no leídos se pide antes de abrir la carpeta.
   const status = folder === "inbox" ? await client.status("INBOX", { unseen: true }) : false;
@@ -267,9 +293,10 @@ export async function listMessages(
     let total = 0;
     let messages: FetchMessageObject[] = [];
 
-    if (query || unreadOnly) {
+    if (query || unreadOnly || category) {
       const criteria: SearchObject = {};
-      if (query) criteria.gmraw = query;
+      const raw = [category ? `category:${category}` : "", query].filter(Boolean).join(" ");
+      if (raw) criteria.gmraw = raw;
       if (unreadOnly) criteria.seen = false;
       const uids = ((await client.search(criteria, { uid: true })) || []) as number[];
       uids.sort((a, b) => b - a);
@@ -287,11 +314,16 @@ export async function listMessages(
 
     messages.sort((a, b) => b.uid - a.uid);
 
+    // Los contadores de las pestañas cuestan una búsqueda cada uno: solo en la
+    // primera página de Recibidos sin búsqueda (al pasar de página no cambian).
+    const countTabs = folder === "inbox" && page === 0 && !query;
+
     return {
       total,
       page,
       page_size: PAGE_SIZE,
       unseen: status ? status.unseen ?? null : null,
+      ...(countTabs ? { unseen_by_category: await unseenByCategory(client) } : {}),
       messages: messages.map(summarize),
     };
   });
@@ -363,10 +395,11 @@ export async function getMessage(client: ImapFlow, account: FamilyMailAccount, f
 /**
  * Marca un correo como leído o no leído en Gmail. Es lo único de "Correo" que
  * cambia algo en el buzón, y solo cuando el coordinador pulsa el botón.
- * Devuelve los no leídos que quedan en Recibidos, para el contador.
+ * Devuelve los no leídos que quedan en Recibidos (y en cada pestaña), para
+ * los contadores.
  */
 export async function setSeen(client: ImapFlow, folder: Folder, uid: number, seen: boolean) {
-  await withFolder(
+  const unseenByTab = await withFolder(
     client,
     folder,
     async () => {
@@ -377,12 +410,14 @@ export async function setSeen(client: ImapFlow, folder: Folder, uid: number, see
         ? await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true })
         : await client.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true });
       if (!ok) throw new InboxError("flag_update_failed", 502);
+
+      return folder === "inbox" ? await unseenByCategory(client) : null;
     },
     { readOnly: false }
   );
 
   const status = await client.status("INBOX", { unseen: true });
-  return { seen, unseen: status ? status.unseen ?? null : null };
+  return { seen, unseen: status ? status.unseen ?? null : null, unseen_by_category: unseenByTab };
 }
 
 export async function downloadAttachment(client: ImapFlow, folder: Folder, uid: number, part: string) {

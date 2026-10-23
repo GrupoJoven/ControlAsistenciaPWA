@@ -139,6 +139,12 @@ la tabla de arriba.
   eso está el botón *Marcar como leído* (o *Marcar como no leído*) del propio
   correo, que lo cambia también en Gmail. Es lo único que la app cambia en el
   buzón: desde ella no se borra ni se mueve nada.
+- **Pestañas**: Recibidos se divide como en Gmail en *Principal* (la que se abre
+  por defecto), *Social*, *Promociones*, *Notificaciones* y *Todas las bandejas*,
+  cada una con sus no leídos. La clasificación es la de Gmail: si un correo cae
+  en la pestaña equivocada, se corrige desde Gmail. Al buscar se busca en todas
+  las pestañas. Si en Gmail se han desactivado las pestañas, puede que
+  *Principal* salga vacía: entonces hay que usar *Todas las bandejas*.
 - **Responder**: solo a correos de Recibidos y solo al remitente (o a su
   *Reply-To*). La respuesta sale desde la misma cuenta, con la firma de
   protección de datos y el correo original citado, y Gmail la agrupa en la misma
