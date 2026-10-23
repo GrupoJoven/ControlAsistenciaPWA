@@ -42,6 +42,11 @@ interface StudentListProps {
   enableMassServices?: boolean;
   schoolNames: { id: string; name: string }[];
   isOnline: boolean;
+  /**
+   * Si se pasa, "Email Padres" abre el correo dentro de la app (Correo, en
+   * Redactar) en vez del programa de correo del dispositivo.
+   */
+  onEmailParents?: (draft: { to: string; subject: string }) => void;
 }
 
 const StudentList: React.FC<StudentListProps> = ({
@@ -60,7 +65,8 @@ const StudentList: React.FC<StudentListProps> = ({
   warningType,
   enableMassServices = false,
   schoolNames,
-  isOnline
+  isOnline,
+  onEmailParents
 }) => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -179,13 +185,17 @@ const StudentList: React.FC<StudentListProps> = ({
   };
 
   const handleContact = (student: Student) => {
-    const subject = encodeURIComponent(`Parroquia San Pascual Baylón - Información sobre ${student.name}`);
+    const subject = `Parroquia San Pascual Baylón - Información sobre ${student.name}`;
     const to = (isEditing ? tempParentEmail : student.parentEmail) || student.parentEmail;
     if (!to) {
       alert("No hay email de padres para este alumno.");
       return;
     }
-    window.location.href = `mailto:${to}?subject=${subject}`;
+    if (onEmailParents) {
+      onEmailParents({ to, subject });
+      return;
+    }
+    window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}`;
   };
 
   const signStudentPhoto = async (path: string) => {

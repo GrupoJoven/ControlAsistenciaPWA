@@ -52,7 +52,7 @@ import ClassDayManager from './components/ClassDayManager';
 import CatechistManager from './components/CatechistManager';
 import CatechistAttendance from './components/CatechistAttendance';
 import FamilyContact from './components/FamilyContact';
-import FamilyInbox from './components/FamilyInbox';
+import FamilyInbox, { type MailDraft } from './components/FamilyInbox';
 import ServicesManagement from './components/ServicesManagement';
 import SchoolCalendar from "./components/SchoolCalendar";
 import BirthdayPopup from './components/BirthdayPopup';
@@ -95,6 +95,8 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [incidentUsers, setIncidentUsers] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  // Correo que "Email Padres" (Todos los Niños) deja preparado para Correo.
+  const [mailDraft, setMailDraft] = useState<MailDraft | null>(null);
 
   const [groupCatechistLinks, setGroupCatechistLinks] = useState<GroupCatechistLink[]>([]);
 
@@ -1810,6 +1812,14 @@ const App: React.FC = () => {
               enableMassServices={true}
               schoolNames={schoolNames}
               isOnline={isOnline}
+              onEmailParents={
+                currentUser.role === 'coordinator'
+                  ? (draft) => {
+                      setMailDraft(draft);
+                      navigateTo('family-inbox');
+                    }
+                  : undefined
+              }
             />
           )}
 
@@ -1841,7 +1851,12 @@ const App: React.FC = () => {
             />
           )}
           {currentView === 'family-inbox' && currentUser.role === 'coordinator' && (
-            <FamilyInbox currentUser={currentUser} isOnline={isOnline} />
+            <FamilyInbox
+              currentUser={currentUser}
+              isOnline={isOnline}
+              initialDraft={mailDraft}
+              onDraftUsed={() => setMailDraft(null)}
+            />
           )}
           {currentView === 'coordinator-edit-groups' && (
             <GroupManager

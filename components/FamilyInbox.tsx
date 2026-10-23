@@ -53,9 +53,16 @@ const parseRecipients = (raw: string) => {
   };
 };
 
+/** Correo nuevo que otra pantalla deja preparado (p. ej. "Email Padres" en Todos los Niños). */
+export type MailDraft = { to: string; subject?: string };
+
 interface FamilyInboxProps {
   currentUser: User;
   isOnline: boolean;
+  /** Si llega, Correo se abre directamente en Redactar con estos datos. */
+  initialDraft?: MailDraft | null;
+  /** Avisa de que el borrador ya se ha usado, para no volver a abrirlo. */
+  onDraftUsed?: () => void;
 }
 
 type Folder = "inbox" | "sent";
@@ -286,7 +293,7 @@ const addressFull = (a: Address) => (a.name ? `${a.name} <${a.address}>` : a.add
 
 // ---------------------------------------------------------------------------
 
-const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
+const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initialDraft, onDraftUsed }) => {
   const isGlobal = isGlobalCoordinator(currentUser);
   const ownStage: Stage | null = isGlobal ? null : (currentUser.stage ?? null);
   const accountEmail = FAMILY_EMAIL_SENDERS[ownStage ?? "global"];
@@ -319,10 +326,10 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replySentTo, setReplySentTo] = useState<string | null>(null);
 
-  const [isComposing, setIsComposing] = useState(false);
-  const [composeTo, setComposeTo] = useState("");
+  const [isComposing, setIsComposing] = useState(!!initialDraft);
+  const [composeTo, setComposeTo] = useState(initialDraft?.to ?? "");
   const [isToFocused, setIsToFocused] = useState(false);
-  const [composeSubject, setComposeSubject] = useState("");
+  const [composeSubject, setComposeSubject] = useState(initialDraft?.subject ?? "");
   const [composeBody, setComposeBody] = useState("");
   const [composeFiles, setComposeFiles] = useState<File[]>([]);
   // Con varias direcciones, por defecto en copia oculta.
@@ -331,6 +338,14 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
   const [composeError, setComposeError] = useState<string | null>(null);
   const [sentNotice, setSentNotice] = useState<string | null>(null);
   const composeToRef = useRef<HTMLInputElement>(null);
+
+  // El borrador recibido ya está en el formulario: se avisa para que la
+  // próxima vez que se entre en Correo no vuelva a abrirse.
+  useEffect(() => {
+    if (initialDraft) onDraftUsed?.();
+    // Solo al montar: el borrador se copia en el estado inicial.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Lista. El contador evita que una respuesta lenta pise a otra más nueva.
   const listRequest = useRef(0);
@@ -1084,7 +1099,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               onFocus={() => setIsToFocused(true)}
               onBlur={() => setIsToFocused(false)}
               placeholder="familia@ejemplo.com, otra@ejemplo.com"
-              autoFocus
+              // Si el Para ya viene relleno (borrador de otra pantalla), se empieza por el mensaje.
+              autoFocus={!initialDraft}
             />
             {shownInvalid.length > 0 ? (
               <p className="text-xs text-amber-700 mt-1 ml-1 break-all">
@@ -1133,6 +1149,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               value={composeBody}
               maxLength={MAX_BODY_LENGTH}
               onChange={(e) => setComposeBody(e.target.value)}
+              autoFocus={!!initialDraft}
             />
           </div>
 
