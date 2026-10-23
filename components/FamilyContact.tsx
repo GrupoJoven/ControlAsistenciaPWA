@@ -14,8 +14,9 @@ import { Group, Student, User } from "../types";
 import { ALL_STAGES, STAGE_LABELS, Stage, isGlobalCoordinator } from "../src/utils/stages";
 
 /**
- * Cuenta desde la que escribe cada coordinador. Debe coincidir con SENDERS en
- * supabase/functions/send-family-email/index.ts, que es quien decide de verdad.
+ * Cuenta desde la que escribe cada coordinador (y cuyo buzón ve en "Correo").
+ * Debe coincidir con FAMILY_MAIL_ACCOUNTS en
+ * supabase/functions/_shared/family-mail-accounts.ts, que es quien decide de verdad.
  */
 export const FAMILY_EMAIL_SENDERS: Record<Stage | "global", string> = {
   preconfirmation: "preconfirmacion@sanpas.es",

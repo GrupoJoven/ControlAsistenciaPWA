@@ -15,6 +15,7 @@ export type View =
   | "catechists"
   | "catechist-attendance"
   | "family-contact"
+  | "family-inbox"
   | "drive"
   | "account"
   | "my-account";

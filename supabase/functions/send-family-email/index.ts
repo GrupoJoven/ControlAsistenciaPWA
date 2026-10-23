@@ -13,7 +13,8 @@
 // para que ninguna familia vea el correo de las demás.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer/mod.ts";
-import { buildFamilyEmailHtml, buildFamilyEmailText } from "./signature.ts";
+import { buildFamilyEmailHtml, buildFamilyEmailText } from "../_shared/family-email-signature.ts";
+import { FAMILY_MAIL_ACCOUNTS, type Stage, getAppPassword } from "../_shared/family-mail-accounts.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -26,31 +27,6 @@ const BATCH_SIZE = 20;
 const MAX_GROUPS = 200;
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_BODY_LENGTH = 20000;
-
-type Stage = "preconfirmation" | "confirmation";
-
-/**
- * Cuenta desde la que escribe cada coordinador. Debe coincidir con
- * FAMILY_EMAIL_SENDERS en components/FamilyContact.tsx.
- * La contraseña de aplicación de Gmail de cada cuenta va en su secret.
- */
-const SENDERS: Record<Stage | "global", { email: string; name: string; passwordSecret: string }> = {
-  preconfirmation: {
-    email: "preconfirmacion@sanpas.es",
-    name: "Preconfirmación San Pascual Baylón",
-    passwordSecret: "SMTP_PASS_PRECONFIRMACION",
-  },
-  confirmation: {
-    email: "confirmacion@sanpas.es",
-    name: "Confirmación San Pascual Baylón",
-    passwordSecret: "SMTP_PASS_CONFIRMACION",
-  },
-  global: {
-    email: "grupojoven@sanpas.es",
-    name: "Grupo Joven San Pascual Baylón",
-    passwordSecret: "SMTP_PASS_GRUPOJOVEN",
-  },
-};
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -120,7 +96,7 @@ Deno.serve(async (req) => {
     if (profile.stage && !callerStage) {
       return jsonResponse({ ok: false, error: "unknown_stage", stage: profile.stage }, 403);
     }
-    const sender = SENDERS[callerStage ?? "global"];
+    const sender = FAMILY_MAIL_ACCOUNTS[callerStage ?? "global"];
 
     // 2) Parámetros
     const { action, group_ids, subject, body, offset } = await req.json().catch(() => ({} as any));
@@ -207,9 +183,7 @@ Deno.serve(async (req) => {
     const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
     const batch = recipients.slice(start, start + BATCH_SIZE);
 
-    // Google muestra la contraseña de aplicación en bloques ("abcd efgh ijkl
-    // mnop"), pero los espacios no forman parte de ella: así da igual cómo se pegue.
-    const smtpPass = (Deno.env.get(sender.passwordSecret) ?? "").replace(/\s+/g, "");
+    const smtpPass = getAppPassword(sender);
     if (!smtpPass) {
       return jsonResponse({ ok: false, error: "smtp_not_configured", secret: sender.passwordSecret, from: sender.email }, 500);
     }

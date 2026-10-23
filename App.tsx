@@ -52,6 +52,7 @@ import ClassDayManager from './components/ClassDayManager';
 import CatechistManager from './components/CatechistManager';
 import CatechistAttendance from './components/CatechistAttendance';
 import FamilyContact from './components/FamilyContact';
+import FamilyInbox from './components/FamilyInbox';
 import ServicesManagement from './components/ServicesManagement';
 import SchoolCalendar from "./components/SchoolCalendar";
 import BirthdayPopup from './components/BirthdayPopup';
@@ -1838,6 +1839,9 @@ const App: React.FC = () => {
               students={students}
               isOnline={isOnline}
             />
+          )}
+          {currentView === 'family-inbox' && currentUser.role === 'coordinator' && (
+            <FamilyInbox currentUser={currentUser} isOnline={isOnline} />
           )}
           {currentView === 'coordinator-edit-groups' && (
             <GroupManager

@@ -13,6 +13,7 @@ export const VIEW_TITLES: Record<View, string> = {
   catechists: "Registro de Catequistas",
   "catechist-attendance": "Asistencia del Equipo",
   "family-contact": "Contactar familias",
+  "family-inbox": "Correo",
   "coordinator-edit-groups": "Administración de Grupos",
   agenda: "Planificador de Eventos",
   reports: "Informes pastorales con IA",

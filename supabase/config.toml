@@ -591,3 +591,14 @@ entrypoint = "./functions/send-family-email/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-family-email/*.html" ]
+
+[functions.family-inbox]
+enabled = true
+verify_jwt = false
+import_map = "./functions/family-inbox/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/family-inbox/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/family-inbox/*.html" ]

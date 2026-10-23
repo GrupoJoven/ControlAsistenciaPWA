@@ -1,7 +1,10 @@
-# Contactar familias: puesta en marcha
+# Contactar familias y Correo: puesta en marcha
 
 La página **Coordinación → Contactar familias** envía un correo a los `parent_email`
-de los niños de los grupos elegidos. Quién envía decide desde qué cuenta sale:
+de los niños de los grupos elegidos. La página **Coordinación → Correo** muestra el
+buzón de Gmail de esa misma cuenta (Recibidos y Enviados) y permite responder
+desde la app (ver [Correo](#correo-leer-y-responder) más abajo). Quién entra
+decide qué cuenta usa:
 
 | Coordinador        | Grupos que puede elegir | Cuenta de envío             | Secret en Supabase           |
 |--------------------|-------------------------|-----------------------------|------------------------------|
@@ -74,12 +77,16 @@ es una ventana de incógnito por cuenta.
 Si el logo no está subido, los correos salen igual pero sin imagen, y la vista
 previa de la app lo avisa.
 
-## 4. Desplegar la edge function y la app
+## 4. Desplegar las edge functions y la app
 
 Desde la carpeta del proyecto (la primera vez puede pedir `npx supabase login`):
 
 ```bash
 npx supabase functions deploy send-family-email
+```
+
+```bash
+npx supabase functions deploy family-inbox
 ```
 
 Después publica la app como haces normalmente para que aparezca la opción en
@@ -106,3 +113,42 @@ el menú.
   no seguir fallando; la app indica a cuántas familias había llegado ya.
 - Los detalles técnicos de cada envío se ven en Supabase, en *Edge Functions →
   send-family-email → Logs*.
+
+---
+
+## Correo: leer y responder
+
+La página **Correo** lee el buzón por IMAP con la **misma contraseña de
+aplicación** de cada cuenta (los secrets `SMTP_PASS_...` del paso 2): no hay que
+crear nada nuevo. Cada coordinador ve solo el buzón de su cuenta, igual que en
+la tabla de arriba.
+
+- **Solo lectura**: la carpeta se abre en modo lectura. Desde la app no se borra
+  ni se mueve nada, y abrir un correo **no lo marca como leído** en Gmail.
+- **Responder**: solo a correos de Recibidos y solo al remitente (o a su
+  *Reply-To*). La respuesta sale desde la misma cuenta, con la firma de
+  protección de datos y el correo original citado, y Gmail la agrupa en la misma
+  conversación y la guarda en *Enviados*.
+- **Seguridad**: el contenido de los correos se limpia antes de mostrarlo (sin
+  scripts ni formularios) y las imágenes externas no se cargan hasta pulsar
+  *Mostrar imágenes*, para que nadie sepa cuándo se ha abierto un correo.
+- **Protección de datos**: cualquier coordinador de una etapa ve **todo** el
+  buzón de esa cuenta, incluidas las respuestas de las familias.
+
+### Requisito: IMAP permitido en Google Workspace
+
+Si al abrir *Correo* aparece *"La cuenta ... no tiene permitido el acceso IMAP"*,
+el administrador de Google Workspace de `sanpas.es` tiene que permitirlo en
+*Consola de administración → Aplicaciones → Google Workspace → Gmail → Acceso de
+usuarios finales → Acceso POP e IMAP* (marcar *Habilitar el acceso IMAP para todos
+los usuarios*, o al menos para estas tres cuentas).
+
+### Problemas habituales
+
+- **"Gmail no acepta la contraseña de aplicación..."**: la contraseña de esa
+  cuenta es incorrecta o se ha revocado (por ejemplo, al cambiar la contraseña
+  normal de la cuenta). Crea una nueva (paso 1) y actualiza su secret (paso 2):
+  sirve a la vez para enviar y para leer.
+- Gmail admite unas 15 conexiones IMAP a la vez por cuenta. Cada pantalla de la
+  app abre y cierra la suya, así que no debería notarse.
+- Los detalles técnicos se ven en *Edge Functions → family-inbox → Logs*.

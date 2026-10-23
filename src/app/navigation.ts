@@ -14,6 +14,7 @@ import {
   Users,
   Briefcase,
   HardDrive,
+  Inbox,
   LucideIcon,
 } from "lucide-react";
 import { View } from "../types/app";
@@ -67,6 +68,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
       { view: "catechists", label: "Registro Catequistas", icon: Briefcase, roles: ["coordinator"] },
       { view: "catechist-attendance", label: "Asistencia Equipo", icon: CheckCircle2, roles: ["coordinator"] },
       { view: "family-contact", label: "Contactar familias", icon: Send, roles: ["coordinator"] },
+      { view: "family-inbox", label: "Correo", icon: Inbox, roles: ["coordinator"] },
       { view: "group-history", label: "Histórico Grupos", icon: CalendarDays, roles: ["coordinator"] },
       { view: "coordinator-edit-groups", label: "Editar Grupos", icon: Settings, roles: ["coordinator"] },
       { view: "class-days", label: "Gestión de calendario", icon: CalendarDays, roles: ["coordinator"] },

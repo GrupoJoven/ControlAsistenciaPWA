@@ -1,8 +1,9 @@
-// supabase/functions/send-family-email/signature.ts
+// supabase/functions/_shared/family-email-signature.ts
 //
 // Firma de protección de datos (RGPD/LOPDGDD) que se añade al final de TODOS los
-// correos enviados desde "Contactar familias". El texto legal es literal: no lo
-// reformules sin que lo revise la coordinación.
+// correos enviados desde "Contactar familias" y de las respuestas enviadas desde
+// "Correo". El texto legal es literal: no lo reformules sin que lo revise la
+// coordinación.
 
 const SIGNATURE_PARAGRAPHS = [
   "De conformidad con lo establecido en el Reglamento UE 679/2016 General de Protección de Datos (en adelante, “RGPD”) y la Ley Orgánica 3/2018, de 5 de diciembre, de Protección de Datos Personales y garantía de los derechos digitales (en adelante, “LOPDGDD”), se les informa que los datos identificativos, serán tratados por el Grupo Joven de SAN PASCUAL BAYLÓN, autorizándose el tratamiento de los datos en los términos indicados.",
@@ -51,7 +52,22 @@ const bodyToHtml = (body: string) =>
     .map((p) => `<p style="margin:0 0 12px">${linkify(p).replace(/\n/g, "<br>")}</p>`)
     .join("");
 
-export const buildFamilyEmailHtml = (body: string, logoUrl: string | null) => {
+/**
+ * Mensaje al que se responde: va debajo de la firma, como hace Gmail. Las
+ * clases gmail_quote hacen que Gmail lo pliegue en "···".
+ */
+export type QuotedMessage = {
+  intro: string; // "El 23 de octubre de 2026, 18:05, Ana <ana@x.es> escribió:"
+  text: string;
+};
+
+const quoteToHtml = (quote: QuotedMessage) =>
+  `<div class="gmail_quote" style="font-family:${FONT_FAMILY};font-size:13px;line-height:1.4;color:#555555;margin-top:24px">
+<p style="margin:0 0 8px">${escapeHtml(quote.intro)}</p>
+<blockquote class="gmail_quote" style="margin:0 0 0 0.8ex;border-left:1px solid #cccccc;padding-left:1ex">${linkify(quote.text.trim()).replace(/\r?\n/g, "<br>")}</blockquote>
+</div>`;
+
+export const buildFamilyEmailHtml = (body: string, logoUrl: string | null, quote?: QuotedMessage) => {
   const paragraphs = SIGNATURE_PARAGRAPHS.map(
     (p) => `<p style="margin:0 0 6px">${linkify(p)}</p>`
   ).join("");
@@ -74,12 +90,13 @@ ${logo}
 <p style="margin:2px 0 0">Web de la parroquia: <a href="${WEB_PARROQUIA}" style="color:#1a56db">${WEB_PARROQUIA}</a></p>
 </div>
 </div>
+${quote ? quoteToHtml(quote) : ""}
 </body>
 </html>`;
 };
 
 /** Versión en texto plano, para los clientes de correo que no muestran HTML. */
-export const buildFamilyEmailText = (body: string) =>
+export const buildFamilyEmailText = (body: string, quote?: QuotedMessage) =>
   [
     body.replace(/\r\n/g, "\n").trim(),
     "",
@@ -89,4 +106,11 @@ export const buildFamilyEmailText = (body: string) =>
     "",
     `Web del joven: ${WEB_JOVEN}`,
     `Web de la parroquia: ${WEB_PARROQUIA}`,
+    ...(quote
+      ? [
+          "",
+          quote.intro,
+          ...quote.text.replace(/\r\n/g, "\n").trim().split("\n").map((line) => `> ${line}`),
+        ]
+      : []),
   ].join("\n");
