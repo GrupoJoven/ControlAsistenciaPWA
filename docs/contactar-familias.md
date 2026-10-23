@@ -12,8 +12,15 @@ más abajo). Quién entra decide qué cuenta usa:
 | Confirmación       | Solo de confirmación    | `confirmacion@sanpas.es`    | `SMTP_PASS_CONFIRMACION`     |
 | General (sin etapa)| Todos                   | `grupojoven@sanpas.es`      | `SMTP_PASS_GRUPOJOVEN`       |
 
-Cada familia recibe su propio correo (nadie ve las direcciones de las demás) y
-siempre se añade al final la firma de protección de datos con el logo.
+El correo sale en **copia oculta (CCO)**: ninguna familia ve las direcciones de
+las demás. Gmail admite como mucho 100 destinatarios por correo enviado así, de
+modo que la app lo manda en tandas de hasta 90 familias (con 250 familias salen
+3 correos). Se pueden adjuntar hasta 10 archivos, 20 MB en total, y siempre se
+añade al final la firma de protección de datos con el logo.
+
+En Enviados de Gmail cada tanda aparece como un correo sin la lista de familias:
+los servidores de correo quitan la copia oculta al enviar para que no pueda
+llegar a nadie.
 
 Para que funcione hay que hacer **una sola vez** los pasos siguientes.
 
@@ -98,14 +105,19 @@ el menú.
    `PRUEBA PRECONFIRMACIÓN`, con un niño ficticio cuyo correo de padres sea el
    tuyo.
 2. Entra con un coordinador de esa etapa, ve a *Contactar familias*, elige solo
-   ese grupo y envía.
-3. Comprueba que llega desde la cuenta correcta, con la firma y el logo. El
+   ese grupo, adjunta un archivo y envía.
+3. Comprueba que llega desde la cuenta correcta, con la firma, el logo y el
+   adjunto, y que en *Para* no aparece tu dirección (va en copia oculta). El
    correo también queda en la carpeta *Enviados* de esa cuenta de Gmail.
 4. Borra el grupo de prueba.
 
 ## Límites y problemas habituales
 
-- **Límite de Gmail**: unos 2.000 correos al día por cuenta de Google Workspace.
+- **Límites de Gmail** ([ayuda de Google](https://support.google.com/a/answer/166852)):
+  100 destinatarios por correo enviado por SMTP (por eso las tandas de 90) y unos
+  3.000 destinatarios externos al día por cuenta.
+- **Adjuntos**: en cada tanda se vuelven a subir. Con muchas familias y archivos
+  grandes, el envío tarda más (con una conexión lenta, sobre todo desde el móvil).
 - **"Falta configurar la contraseña de aplicación…"**: falta el secret de esa
   cuenta o tiene otro nombre (paso 2).
 - **"Gmail ha rechazado el envío…"**: la contraseña de aplicación es incorrecta,

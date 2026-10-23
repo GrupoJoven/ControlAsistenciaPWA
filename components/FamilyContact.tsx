@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Loader2,
   Mail,
+  Paperclip,
   Send,
   ShieldCheck,
   Users,
@@ -12,6 +13,12 @@ import {
 import { supabase } from "../src/lib/supabaseClient";
 import { Group, Student, User } from "../types";
 import { ALL_STAGES, STAGE_LABELS, Stage, isGlobalCoordinator } from "../src/utils/stages";
+import AttachmentPicker, {
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENTS_MB,
+  formatFileSize,
+  withAttachments,
+} from "./AttachmentPicker";
 
 /**
  * Cuenta desde la que escribe cada coordinador (y cuyo buzón ve en "Correo").
@@ -41,6 +48,9 @@ type Preview = {
   from: string;
   logo: boolean;
   html: string;
+  /** Familias por correo: cada tanda sale en un correo con todas en CCO. */
+  batch_size: number;
+  batches: number;
 };
 
 type Progress = {
@@ -66,8 +76,10 @@ class FamilyEmailError extends Error {
   }
 }
 
-const invokeFamilyEmail = async (payload: Record<string, unknown>) => {
-  const { data, error } = await supabase.functions.invoke("send-family-email", { body: payload });
+const invokeFamilyEmail = async (payload: Record<string, unknown>, files: File[] = []) => {
+  const { data, error } = await supabase.functions.invoke("send-family-email", {
+    body: withAttachments(payload, files),
+  });
 
   if (error) {
     // En errores HTTP, supabase-js deja la respuesta original en error.context.
@@ -90,7 +102,12 @@ const describeError = (e: unknown): string => {
   const d = e.detail ?? {};
   switch (e.code) {
     case "smtp_not_configured":
+    case "password_not_configured":
       return `Falta configurar la contraseña de aplicación de ${d.from ?? "la cuenta de envío"} en Supabase (secret ${d.secret ?? "SMTP_PASS_..."}).`;
+    case "too_many_attachments":
+      return `Como mucho ${d.max ?? MAX_ATTACHMENTS} archivos por correo.`;
+    case "attachments_too_large":
+      return `Los adjuntos no pueden pasar de ${d.max_mb ?? MAX_ATTACHMENTS_MB} MB en total.`;
     case "smtp_send_failed":
       return `Gmail ha rechazado el envío desde ${d.from ?? "la cuenta"}. Revisa su contraseña de aplicación o si se ha alcanzado el límite diario de Gmail.${d.details ? `\n\nDetalle: ${d.details}` : ""}`;
     case "group_not_allowed":
@@ -124,6 +141,7 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -232,15 +250,19 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
     setProgress({ sent, failed: [], total, done: false });
 
     try {
-      // Una llamada por tanda: la edge function envía como mucho 20 por vez.
+      // Una llamada por tanda: cada una es un correo con sus familias en CCO,
+      // y los adjuntos se suben en cada una.
       while (offset < total) {
-        const data = await invokeFamilyEmail({
-          action: "send",
-          group_ids: effectiveSelected,
-          subject,
-          body,
-          offset,
-        });
+        const data = await invokeFamilyEmail(
+          {
+            action: "send",
+            group_ids: effectiveSelected,
+            subject,
+            body,
+            offset,
+          },
+          files
+        );
 
         sent += data.sent ?? 0;
         failed.push(...(data.failed ?? []));
@@ -259,6 +281,7 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
       if (failed.length === 0) {
         setSubject("");
         setBody("");
+        setFiles([]);
         setSelectedGroupIds([]);
       }
     } catch (e) {
@@ -289,7 +312,7 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Se enviará desde</p>
           <p className="font-bold text-slate-800 truncate">{senderEmail}</p>
           <p className="text-xs text-slate-500 mt-1">
-            Cada familia recibe su propio correo: nadie ve las direcciones de las demás.
+            Se envía en copia oculta (CCO): ninguna familia ve las direcciones de las demás.
           </p>
         </div>
       </div>
@@ -397,6 +420,7 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
             placeholder={"Estimadas familias:\n\n..."}
           />
         </div>
+        <AttachmentPicker files={files} onChange={setFiles} disabled={isSending} />
         <p className="text-xs text-slate-500 flex items-start gap-2">
           <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
           Al final del correo se añade automáticamente la firma de protección de datos con el logo del Grupo Joven.
@@ -447,6 +471,30 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
                       </p>
                     </div>
                   </div>
+
+                  {preview.total > 0 && (
+                    <p className="text-xs text-slate-600 bg-slate-50 rounded-xl p-3 flex items-start gap-2">
+                      <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
+                      {preview.batches > 1
+                        ? `Saldrá en ${preview.batches} correos de hasta ${preview.batch_size} familias (el máximo que admite Gmail por correo es 100), todas en copia oculta (CCO).`
+                        : "Saldrá en un solo correo con todas las familias en copia oculta (CCO)."}
+                    </p>
+                  )}
+
+                  {files.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {files.map((f, i) => (
+                        <span
+                          key={`${f.name}-${f.size}-${i}`}
+                          className="max-w-full px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 bg-slate-50 text-slate-700 flex items-center gap-1.5"
+                        >
+                          <Paperclip size={12} className="shrink-0" />
+                          <span className="truncate">{f.name}</span>
+                          <span className="font-normal text-slate-400 shrink-0">{formatFileSize(f.size)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {preview.students_without_email > 0 && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">

@@ -6,24 +6,26 @@
 // - action "preview": valida permisos y devuelve cuántas familias lo recibirán,
 //   desde qué cuenta y el HTML final (con la firma de protección de datos).
 // - action "send": envía UNA TANDA (desde `offset`, como mucho BATCH_SIZE
-//   familias). El frontend va pidiendo tandas hasta terminar, así ninguna
-//   llamada se acerca al límite de tiempo de las edge functions.
+//   familias) en un solo correo con todas en copia oculta (CCO), así ninguna
+//   familia ve las direcciones de las demás. El frontend va pidiendo tandas
+//   hasta terminar.
 //
-// Se envía un correo por familia (nunca todas las direcciones juntas en To/Cc)
-// para que ninguna familia vea el correo de las demás.
+// "send" admite adjuntos: llegan como multipart/form-data (ver
+// readMailRequest en _shared/family-mail-outbox.ts) y el frontend los vuelve a
+// subir en cada tanda.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { SMTPClient } from "https://deno.land/x/denomailer/mod.ts";
-import { buildFamilyEmailHtml, buildFamilyEmailText } from "../_shared/family-email-signature.ts";
-import { FAMILY_MAIL_ACCOUNTS, type Stage, getAppPassword } from "../_shared/family-mail-accounts.ts";
+import { buildFamilyEmailHtml } from "../_shared/family-email-signature.ts";
+import { FAMILY_MAIL_ACCOUNTS, type Stage } from "../_shared/family-mail-accounts.ts";
+import { FamilyMailError } from "../_shared/family-mail-error.ts";
+import { getLogoUrl, readAttachments, readMailRequest, sendFamilyMail } from "../_shared/family-mail-outbox.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Logo de la firma: bucket público de Storage (ver docs/contactar-familias.md).
-// Si todavía no se ha subido, el correo sale igual pero sin imagen.
-const LOGO_URL = `${SUPABASE_URL}/storage/v1/object/public/email-assets/logo-grupo-joven.png`;
-
-const BATCH_SIZE = 20;
+// Gmail admite como mucho 100 destinatarios por correo enviado por SMTP
+// (https://support.google.com/a/answer/166852): cada tanda es un correo con
+// hasta 90 familias en CCO, con margen.
+const BATCH_SIZE = 90;
 const MAX_GROUPS = 200;
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_BODY_LENGTH = 20000;
@@ -50,15 +52,6 @@ function splitEmails(raw: string | null | undefined): string[] {
     .split(/[;,\s]+/)
     .map((s) => s.trim().toLowerCase())
     .filter((s) => EMAIL_RE.test(s));
-}
-
-async function logoIsAvailable(): Promise<boolean> {
-  try {
-    const res = await fetch(LOGO_URL, { method: "HEAD" });
-    return res.ok;
-  } catch {
-    return false;
-  }
 }
 
 Deno.serve(async (req) => {
@@ -98,8 +91,9 @@ Deno.serve(async (req) => {
     }
     const sender = FAMILY_MAIL_ACCOUNTS[callerStage ?? "global"];
 
-    // 2) Parámetros
-    const { action, group_ids, subject, body, offset } = await req.json().catch(() => ({} as any));
+    // 2) Parámetros (y adjuntos, si los hay)
+    const { params, files } = await readMailRequest(req);
+    const { action, group_ids, subject, body, offset } = params ?? {};
 
     if (action !== "preview" && action !== "send") {
       return jsonResponse({ ok: false, error: "invalid_action" }, 400);
@@ -164,10 +158,8 @@ Deno.serve(async (req) => {
     }
     const recipients = Array.from(recipientSet).sort();
 
-    const logoUrl = (await logoIsAvailable()) ? LOGO_URL : null;
-    const html = buildFamilyEmailHtml(cleanBody, logoUrl);
-
     if (action === "preview") {
+      const logoUrl = await getLogoUrl();
       return jsonResponse({
         ok: true,
         total: recipients.length,
@@ -175,80 +167,44 @@ Deno.serve(async (req) => {
         students_without_email: studentsWithoutEmail,
         from: sender.email,
         logo: Boolean(logoUrl),
-        html,
+        html: buildFamilyEmailHtml(cleanBody, logoUrl),
+        batch_size: BATCH_SIZE,
+        batches: Math.ceil(recipients.length / BATCH_SIZE),
       });
     }
 
-    // 5) Enviar una tanda
+    // 5) Enviar una tanda: un correo con sus familias en CCO
+    const attachments = await readAttachments(files, params.attachment_names);
     const start = Number.isInteger(offset) && offset >= 0 ? offset : 0;
     const batch = recipients.slice(start, start + BATCH_SIZE);
-
-    const smtpPass = getAppPassword(sender);
-    if (!smtpPass) {
-      return jsonResponse({ ok: false, error: "smtp_not_configured", secret: sender.passwordSecret, from: sender.email }, 500);
-    }
-
-    const smtp = new SMTPClient({
-      connection: {
-        hostname: Deno.env.get("SMTP_HOST") ?? "smtp.gmail.com",
-        port: Number(Deno.env.get("SMTP_PORT") ?? "465"),
-        tls: true,
-        auth: { username: sender.email, password: smtpPass },
-      },
-    });
-
-    const text = buildFamilyEmailText(cleanBody);
-    const failed: string[] = [];
-    let sent = 0;
-    let lastError = "";
-
-    try {
-      for (const to of batch) {
-        try {
-          await smtp.send({
-            from: `${sender.name} <${sender.email}>`,
-            to,
-            subject: cleanSubject,
-            content: text,
-            html,
-          });
-          sent++;
-        } catch (e) {
-          lastError = String(e);
-          console.log("SMTP send error", lastError);
-          failed.push(to);
-        }
-      }
-    } finally {
-      // Si la conexión nunca llegó a abrirse (p. ej. contraseña mal), close()
-      // también falla: no debe tapar el resultado de la tanda.
-      try {
-        await smtp.close();
-      } catch {
-        // nada
-      }
-    }
-
     const nextOffset = start + batch.length;
 
-    // Si no ha salido ni uno, casi seguro es la cuenta (contraseña de aplicación
-    // incorrecta, límite diario de Gmail...): se corta para no seguir con tandas.
-    if (batch.length > 0 && sent === 0) {
-      return jsonResponse(
-        { ok: false, error: "smtp_send_failed", details: lastError, from: sender.email, next_offset: start },
-        502
-      );
+    let result = { sent: [] as string[], failed: [] as string[] };
+    if (batch.length > 0) {
+      try {
+        result = await sendFamilyMail(sender, { bcc: batch, subject: cleanSubject, attachments }, cleanBody);
+      } catch (e) {
+        // Si Gmail rechaza la tanda, casi seguro es la cuenta (contraseña de
+        // aplicación, límite diario...): se corta para no seguir con más tandas.
+        if (e instanceof FamilyMailError) {
+          return jsonResponse({ ok: false, error: e.code, ...e.extra, next_offset: start }, e.status);
+        }
+        throw e;
+      }
     }
 
     return jsonResponse({
       ok: true,
-      sent,
-      failed,
+      sent: result.sent.length,
+      failed: result.failed,
       total: recipients.length,
       next_offset: nextOffset,
       done: nextOffset >= recipients.length,
     });
   } catch (e) {
+    if (e instanceof FamilyMailError) {
+      return jsonResponse({ ok: false, error: e.code, ...e.extra }, e.status);
+    }
     console.log("Unhandled error:", e);
     return jsonResponse({ ok: false, error: String(e) }, 500);
   }

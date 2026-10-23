@@ -19,8 +19,9 @@
 // parámetros en el campo "payload" (JSON, con los nombres de los archivos en
 // attachment_names) y los archivos en "attachments".
 //
-// La lectura por IMAP está en mailbox.ts y el envío en outbox.ts; aquí, quién
-// llama, qué buzón le toca y qué se pide.
+// La lectura por IMAP está en mailbox.ts y el envío en
+// _shared/family-mail-outbox.ts (compartido con "Contactar familias"); aquí,
+// quién llama, qué buzón le toca y qué se pide.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ImapFlow } from "npm:imapflow@2.2.5";
 import { FAMILY_MAIL_ACCOUNTS, type Stage } from "../_shared/family-mail-accounts.ts";
@@ -35,7 +36,7 @@ import {
   prepareReply,
   setSeen,
 } from "./mailbox.ts";
-import { readAttachments, sendFamilyMail } from "./outbox.ts";
+import { readAttachments, readMailRequest, sendFamilyMail } from "../_shared/family-mail-outbox.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -73,22 +74,6 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-/** Parámetros y archivos: JSON normal, o multipart/form-data cuando hay adjuntos. */
-async function readRequest(req: Request): Promise<{ params: any; files: File[] }> {
-  if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
-    const form = await req.formData();
-    let params: any = {};
-    try {
-      params = JSON.parse(String(form.get("payload") ?? "{}"));
-    } catch {
-      // payload mal formado: se queda sin acción y se rechaza abajo
-    }
-    const files = form.getAll("attachments").filter((f): f is File => f instanceof File);
-    return { params, files };
-  }
-  return { params: await req.json().catch(() => ({})), files: [] };
 }
 
 Deno.serve(async (req) => {
@@ -131,7 +116,7 @@ Deno.serve(async (req) => {
     const account = FAMILY_MAIL_ACCOUNTS[callerStage ?? "global"];
 
     // 2) Parámetros
-    const { params, files } = await readRequest(req);
+    const { params, files } = await readMailRequest(req);
     const action = params?.action;
     if (!["list", "get", "attachment", "mark", "reply", "send"].includes(action)) {
       return jsonResponse({ ok: false, error: "invalid_action" }, 400);

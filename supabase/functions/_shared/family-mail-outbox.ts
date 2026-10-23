@@ -1,9 +1,10 @@
-// supabase/functions/family-inbox/outbox.ts
+// supabase/functions/_shared/family-mail-outbox.ts
 //
-// Envío de "Correo" (respuestas y correos nuevos) por SMTP con nodemailer,
-// desde la cuenta del coordinador y siempre con la firma de protección de datos.
+// Envío por SMTP con nodemailer de "Correo" (respuestas y correos nuevos) y de
+// "Contactar familias", desde la cuenta del coordinador y siempre con la firma
+// de protección de datos.
 //
-// No usa denomailer como "Contactar familias" porque con adjuntos no sirve:
+// Se usa nodemailer y no denomailer porque con adjuntos denomailer no sirve:
 // escribe sin codificar el nombre de los archivos (se rompe con tildes o
 // espacios), separa los destinatarios con ";" en vez de "," y manda los
 // adjuntos en miles de escrituras de 75 caracteres, que gastan más CPU de la
@@ -11,15 +12,12 @@
 import nodemailer from "npm:nodemailer@10.0.14";
 import tls from "node:tls";
 import { Buffer } from "node:buffer";
-import {
-  buildFamilyEmailHtml,
-  buildFamilyEmailText,
-  type QuotedMessage,
-} from "../_shared/family-email-signature.ts";
-import { type FamilyMailAccount, getAppPassword } from "../_shared/family-mail-accounts.ts";
-import { InboxError } from "./mailbox.ts";
+import { buildFamilyEmailHtml, buildFamilyEmailText, type QuotedMessage } from "./family-email-signature.ts";
+import { type FamilyMailAccount, getAppPassword } from "./family-mail-accounts.ts";
+import { FamilyMailError } from "./family-mail-error.ts";
 
-// Mismo logo que "Contactar familias"; si no está subido, el correo sale sin imagen.
+// Logo de la firma: bucket público de Storage (ver docs/contactar-familias.md).
+// Si todavía no se ha subido, el correo sale igual pero sin imagen.
 const LOGO_URL = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/email-assets/logo-grupo-joven.png`;
 
 export const MAX_ATTACHMENTS = 10;
@@ -48,11 +46,11 @@ export type OutgoingMail = {
  */
 export async function readAttachments(files: File[], names: unknown): Promise<OutgoingAttachment[]> {
   if (files.length > MAX_ATTACHMENTS) {
-    throw new InboxError("too_many_attachments", 400, { max: MAX_ATTACHMENTS });
+    throw new FamilyMailError("too_many_attachments", 400, { max: MAX_ATTACHMENTS });
   }
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total > MAX_ATTACHMENTS_BYTES) {
-    throw new InboxError("attachments_too_large", 413, { max_mb: MAX_ATTACHMENTS_BYTES / (1024 * 1024) });
+    throw new FamilyMailError("attachments_too_large", 413, { max_mb: MAX_ATTACHMENTS_BYTES / (1024 * 1024) });
   }
 
   const nameList = Array.isArray(names) ? names : [];
@@ -71,12 +69,33 @@ export async function readAttachments(files: File[], names: unknown): Promise<Ou
   );
 }
 
-async function logoIsAvailable(): Promise<boolean> {
+/**
+ * Parámetros y archivos de la petición: JSON normal, o multipart/form-data
+ * cuando hay adjuntos (parámetros en el campo "payload", archivos en
+ * "attachments" y sus nombres en payload.attachment_names).
+ */
+export async function readMailRequest(req: Request): Promise<{ params: any; files: File[] }> {
+  if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
+    const form = await req.formData();
+    let params: any = {};
+    try {
+      params = JSON.parse(String(form.get("payload") ?? "{}"));
+    } catch {
+      // payload mal formado: se queda sin acción y la función lo rechaza
+    }
+    const files = form.getAll("attachments").filter((f): f is File => f instanceof File);
+    return { params, files };
+  }
+  return { params: await req.json().catch(() => ({})), files: [] };
+}
+
+/** URL del logo de la firma, o null si todavía no está subido. */
+export async function getLogoUrl(): Promise<string | null> {
   try {
     const res = await fetch(LOGO_URL, { method: "HEAD" });
-    return res.ok;
+    return res.ok ? LOGO_URL : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -115,10 +134,10 @@ function createTransport(account: FamilyMailAccount, password: string) {
 export async function sendFamilyMail(account: FamilyMailAccount, mail: OutgoingMail, body: string) {
   const password = getAppPassword(account);
   if (!password) {
-    throw new InboxError("password_not_configured", 500, { secret: account.passwordSecret, from: account.email });
+    throw new FamilyMailError("password_not_configured", 500, { secret: account.passwordSecret, from: account.email });
   }
 
-  const logoUrl = (await logoIsAvailable()) ? LOGO_URL : null;
+  const logoUrl = await getLogoUrl();
   const transport = createTransport(account, password);
 
   try {
@@ -141,7 +160,7 @@ export async function sendFamilyMail(account: FamilyMailAccount, mail: OutgoingM
   } catch (e: any) {
     const details = String(e?.response ?? e?.message ?? e);
     console.log("SMTP send error", details);
-    throw new InboxError("smtp_send_failed", 502, { from: account.email, details });
+    throw new FamilyMailError("smtp_send_failed", 502, { from: account.email, details });
   } finally {
     transport.close();
   }

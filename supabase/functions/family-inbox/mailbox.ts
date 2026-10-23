@@ -14,6 +14,7 @@ import type {
 } from "npm:imapflow@2.2.5";
 import type { QuotedMessage } from "../_shared/family-email-signature.ts";
 import { type FamilyMailAccount, getAppPassword } from "../_shared/family-mail-accounts.ts";
+import { FamilyMailError as InboxError } from "../_shared/family-mail-error.ts";
 
 export const PAGE_SIZE = 25;
 const MAX_SUBJECT_LENGTH = 200;
@@ -27,12 +28,8 @@ const MAX_QUOTE_LENGTH = 10000;
 
 export type Folder = "inbox" | "sent";
 
-/** Error con su código para el frontend (components/FamilyInbox.tsx). */
-export class InboxError extends Error {
-  constructor(public code: string, public status: number, public extra: Record<string, unknown> = {}) {
-    super(code);
-  }
-}
+/** Error con su código para el frontend; es el mismo que lanza el envío compartido. */
+export { InboxError };
 
 const EMAIL_RE = /^[^\s@<>()[\],;:"]+@[^\s@<>()[\],;:"]+\.[^\s@<>()[\],;:"]+$/;
 
