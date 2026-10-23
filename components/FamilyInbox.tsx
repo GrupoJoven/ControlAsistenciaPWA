@@ -9,6 +9,8 @@ import {
   Image as ImageIcon,
   Inbox,
   Loader2,
+  Mail,
+  MailOpen,
   Paperclip,
   RefreshCw,
   Reply,
@@ -134,6 +136,8 @@ const describeError = (e: unknown): string => {
       return "No se encuentra ese adjunto en el correo.";
     case "attachment_too_large":
       return "El adjunto es demasiado grande para descargarlo desde la app. Ábrelo desde Gmail.";
+    case "flag_update_failed":
+      return "Gmail no ha dejado cambiar si este correo está leído. Inténtalo de nuevo o hazlo desde Gmail.";
     case "no_reply_recipient":
       return "Este correo no tiene una dirección a la que responder.";
     case "no_recipients":
@@ -301,6 +305,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
   const [messageError, setMessageError] = useState<string | null>(null);
   const [showImages, setShowImages] = useState(false);
   const [downloadingPart, setDownloadingPart] = useState<string | null>(null);
+  const [isMarking, setIsMarking] = useState(false);
 
   const [isReplyOpen, setIsReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
@@ -403,6 +408,36 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     setMessage(null);
     setMessageError(null);
     setIsMessageLoading(false);
+  };
+
+  /** Abrir un correo no lo marca como leído: solo este botón cambia su estado en Gmail. */
+  const handleToggleSeen = async () => {
+    if (!message || isMarking) return;
+    const { uid, folder: messageFolder } = message;
+
+    setIsMarking(true);
+    try {
+      const data = (await invokeInbox({ action: "mark", folder: messageFolder, uid, seen: !message.seen })) as {
+        seen: boolean;
+        unseen: number | null;
+      };
+
+      setMessage((m) => (m && m.uid === uid ? { ...m, seen: data.seen } : m));
+      setList((l) =>
+        l
+          ? {
+              ...l,
+              unseen: messageFolder === "inbox" ? data.unseen : l.unseen,
+              messages: l.messages.map((x) => (x.uid === uid ? { ...x, seen: data.seen } : x)),
+            }
+          : l
+      );
+      if (data.unseen !== null) setInboxUnseen(data.unseen);
+    } catch (e) {
+      alert(describeError(e));
+    } finally {
+      setIsMarking(false);
+    }
   };
 
   const handleDownload = async (att: Attachment) => {
@@ -561,7 +596,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Buzón de</p>
           <p className="font-bold text-slate-800 truncate">{accountEmail}</p>
           <p className="text-xs text-slate-500 mt-1">
-            Abrir un correo aquí no lo marca como leído en Gmail, y desde la app no se borra ni se mueve nada.
+            Abrir un correo aquí no lo marca como leído en Gmail: hazlo con el botón del propio correo. Desde la app
+            no se borra ni se mueve nada.
           </p>
         </div>
       </div>
@@ -785,14 +821,34 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
       {/* Mensaje */}
       {openUid !== null && (
         <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <button
-            type="button"
-            onClick={closeMessage}
-            disabled={isReplying}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all flex items-center gap-1.5 disabled:opacity-40"
-          >
-            <ArrowLeft size={14} /> {folder === "inbox" ? "Recibidos" : "Enviados"}
-          </button>
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={closeMessage}
+              disabled={isReplying}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all flex items-center gap-1.5 disabled:opacity-40"
+            >
+              <ArrowLeft size={14} /> {folder === "inbox" ? "Recibidos" : "Enviados"}
+            </button>
+
+            {message?.folder === "inbox" && (
+              <button
+                type="button"
+                onClick={() => void handleToggleSeen()}
+                disabled={isMarking || !isOnline}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isMarking ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : message.seen ? (
+                  <Mail size={14} />
+                ) : (
+                  <MailOpen size={14} />
+                )}
+                {message.seen ? "Marcar como no leído" : "Marcar como leído"}
+              </button>
+            )}
+          </div>
 
           {isMessageLoading && (
             <p className="text-sm text-slate-500 flex items-center gap-2">

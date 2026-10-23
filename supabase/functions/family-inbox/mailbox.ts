@@ -2,7 +2,8 @@
 //
 // Lectura del buzón por IMAP para "Correo". Todo se hace con la carpeta abierta
 // en solo lectura (EXAMINE): nada se borra ni se mueve, y abrir un correo aquí
-// no lo marca como leído en Gmail.
+// no lo marca como leído en Gmail. La única excepción es setSeen(), que marca un
+// correo como leído o no leído cuando el coordinador lo pide.
 import { Buffer } from "node:buffer";
 import { ImapFlow } from "npm:imapflow@2.2.5";
 import type {
@@ -176,10 +177,18 @@ async function folderPath(client: ImapFlow, folder: Folder): Promise<string> {
   return sent.path;
 }
 
-/** Abre la carpeta en solo lectura (EXAMINE), ejecuta fn y la suelta. */
-async function withFolder<T>(client: ImapFlow, folder: Folder, fn: () => Promise<T>): Promise<T> {
+/**
+ * Abre la carpeta, ejecuta fn y la suelta. Por defecto en solo lectura
+ * (EXAMINE); con readOnly: false (SELECT), solo para setSeen().
+ */
+async function withFolder<T>(
+  client: ImapFlow,
+  folder: Folder,
+  fn: () => Promise<T>,
+  { readOnly = true }: { readOnly?: boolean } = {}
+): Promise<T> {
   const path = await folderPath(client, folder);
-  const lock = await client.getMailboxLock(path, { readOnly: true });
+  const lock = await client.getMailboxLock(path, { readOnly });
   try {
     return await fn();
   } finally {
@@ -338,6 +347,31 @@ export async function getMessage(client: ImapFlow, account: FamilyMailAccount, f
       reply_to: recipient,
     };
   });
+}
+
+/**
+ * Marca un correo como leído o no leído en Gmail. Es lo único de "Correo" que
+ * cambia algo en el buzón, y solo cuando el coordinador pulsa el botón.
+ * Devuelve los no leídos que quedan en Recibidos, para el contador.
+ */
+export async function setSeen(client: ImapFlow, folder: Folder, uid: number, seen: boolean) {
+  await withFolder(
+    client,
+    folder,
+    async () => {
+      const msg = await client.fetchOne(String(uid), { uid: true }, { uid: true });
+      if (!msg) throw new InboxError("message_not_found", 404);
+
+      const ok = seen
+        ? await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true })
+        : await client.messageFlagsRemove(String(uid), ["\\Seen"], { uid: true });
+      if (!ok) throw new InboxError("flag_update_failed", 502);
+    },
+    { readOnly: false }
+  );
+
+  const status = await client.status("INBOX", { unseen: true });
+  return { seen, unseen: status ? status.unseen ?? null : null };
 }
 
 export async function downloadAttachment(client: ImapFlow, folder: Folder, uid: number, part: string) {

@@ -8,13 +8,15 @@
 // - action "get": un mensaje con su texto, sus imágenes incrustadas y la lista
 //   de adjuntos.
 // - action "attachment": descarga un adjunto (respuesta binaria).
+// - action "mark": marca un correo como leído o no leído (seen: true/false).
+//   Abrirlo no lo marca: solo cambia cuando el coordinador lo pide.
 // - action "reply": responde a un mensaje de Recibidos desde la misma cuenta,
 //   solo a su remitente y con la firma de protección de datos.
 // - action "send": correo nuevo desde la misma cuenta, con la firma. Si hay
 //   varias direcciones, cada una recibe su propio correo (nadie ve las demás).
 //
-// La lectura (IMAP, en solo lectura) está en mailbox.ts; aquí, quién llama, qué
-// buzón le toca y el envío de las respuestas.
+// La lectura por IMAP está en mailbox.ts; aquí, quién llama, qué buzón le toca
+// y el envío de los correos.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SMTPClient } from "https://deno.land/x/denomailer/mod.ts";
 import type { ImapFlow } from "npm:imapflow@2.2.5";
@@ -35,6 +37,7 @@ import {
   listMessages,
   openImap,
   prepareReply,
+  setSeen,
 } from "./mailbox.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -195,7 +198,7 @@ Deno.serve(async (req) => {
     // 2) Parámetros
     const params = await req.json().catch(() => ({} as any));
     const action = params?.action;
-    if (!["list", "get", "attachment", "reply", "send"].includes(action)) {
+    if (!["list", "get", "attachment", "mark", "reply", "send"].includes(action)) {
       return jsonResponse({ ok: false, error: "invalid_action" }, 400);
     }
 
@@ -249,6 +252,12 @@ Deno.serve(async (req) => {
     if (action === "get") {
       const message = await getMessage(client, account, folder, uid);
       return jsonResponse({ ok: true, account: account.email, message });
+    }
+
+    if (action === "mark") {
+      if (typeof params.seen !== "boolean") return jsonResponse({ ok: false, error: "invalid_seen" }, 400);
+      const result = await setSeen(client, folder, uid, params.seen);
+      return jsonResponse({ ok: true, uid, ...result });
     }
 
     // action === "attachment"

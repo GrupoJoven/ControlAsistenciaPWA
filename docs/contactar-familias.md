@@ -123,8 +123,10 @@ aplicación** de cada cuenta (los secrets `SMTP_PASS_...` del paso 2): no hay qu
 crear nada nuevo. Cada coordinador ve solo el buzón de su cuenta, igual que en
 la tabla de arriba.
 
-- **Solo lectura**: la carpeta se abre en modo lectura. Desde la app no se borra
-  ni se mueve nada, y abrir un correo **no lo marca como leído** en Gmail.
+- **Leído / no leído**: abrir un correo **no lo marca como leído** en Gmail. Para
+  eso está el botón *Marcar como leído* (o *Marcar como no leído*) del propio
+  correo, que lo cambia también en Gmail. Es lo único que la app cambia en el
+  buzón: desde ella no se borra ni se mueve nada.
 - **Responder**: solo a correos de Recibidos y solo al remitente (o a su
   *Reply-To*). La respuesta sale desde la misma cuenta, con la firma de
   protección de datos y el correo original citado, y Gmail la agrupa en la misma
