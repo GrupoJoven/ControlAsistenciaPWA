@@ -15,6 +15,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  SquarePen,
   X,
 } from "lucide-react";
 import { supabase } from "../src/lib/supabaseClient";
@@ -23,6 +24,26 @@ import { Stage, isGlobalCoordinator } from "../src/utils/stages";
 import { FAMILY_EMAIL_SENDERS } from "./FamilyContact";
 
 const MAX_BODY_LENGTH = 20000;
+const MAX_SUBJECT_LENGTH = 200;
+const MAX_RECIPIENTS = 20;
+
+const EMAIL_RE = /^[^\s@<>()[\],;:"]+@[^\s@<>()[\],;:"]+\.[^\s@<>()[\],;:"]+$/;
+
+/** Misma regla que la edge function: direcciones separadas por comas, punto y coma o espacios. */
+const parseRecipients = (raw: string) => {
+  const unique = Array.from(
+    new Set(
+      raw
+        .split(/[,;\s]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  return {
+    valid: unique.filter((e) => EMAIL_RE.test(e)),
+    invalid: unique.filter((e) => !EMAIL_RE.test(e)),
+  };
+};
 
 interface FamilyInboxProps {
   currentUser: User;
@@ -115,10 +136,20 @@ const describeError = (e: unknown): string => {
       return "El adjunto es demasiado grande para descargarlo desde la app. Ábrelo desde Gmail.";
     case "no_reply_recipient":
       return "Este correo no tiene una dirección a la que responder.";
+    case "no_recipients":
+      return "Escribe al menos una dirección en Para.";
+    case "invalid_recipients":
+      return `Revisa estas direcciones: ${(d.invalid ?? []).join(", ")}`;
+    case "too_many_recipients":
+      return `Como mucho ${d.max ?? MAX_RECIPIENTS} direcciones por correo. Para escribir a grupos enteros usa "Contactar familias".`;
+    case "missing_subject":
+      return "Escribe el asunto.";
+    case "subject_too_long":
+      return `El asunto no puede superar los ${MAX_SUBJECT_LENGTH} caracteres.`;
     case "missing_body":
-      return "Escribe la respuesta.";
+      return "Escribe el mensaje.";
     case "body_too_long":
-      return `La respuesta no puede superar los ${MAX_BODY_LENGTH} caracteres.`;
+      return `El mensaje no puede superar los ${MAX_BODY_LENGTH} caracteres.`;
     case "forbidden":
       return "Solo los coordinadores pueden ver el correo.";
     case "invalid_or_missing_jwt":
@@ -277,6 +308,16 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replySentTo, setReplySentTo] = useState<string | null>(null);
 
+  const [isComposing, setIsComposing] = useState(false);
+  const [composeTo, setComposeTo] = useState("");
+  const [isToFocused, setIsToFocused] = useState(false);
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeBody, setComposeBody] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
+  const [sentNotice, setSentNotice] = useState<string | null>(null);
+  const composeToRef = useRef<HTMLInputElement>(null);
+
   // Lista. El contador evita que una respuesta lenta pise a otra más nueva.
   const listRequest = useRef(0);
   useEffect(() => {
@@ -326,6 +367,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
 
   const changeFolder = (next: Folder) => {
     if (next === folder) return;
+    setSentNotice(null);
     closeMessage();
     setFolder(next);
     setPage(0);
@@ -414,6 +456,91 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     }
   };
 
+  const openCompose = () => {
+    closeMessage();
+    setIsComposing(true);
+    setComposeError(null);
+    setSentNotice(null);
+    topRef.current?.scrollIntoView({ block: "start" });
+  };
+
+  const resetCompose = () => {
+    setIsComposing(false);
+    setComposeTo("");
+    setComposeSubject("");
+    setComposeBody("");
+    setComposeError(null);
+  };
+
+  const discardCompose = () => {
+    if (isSending) return;
+    const hasDraft = composeTo.trim() || composeSubject.trim() || composeBody.trim();
+    if (hasDraft && !window.confirm("¿Descartar este correo?")) return;
+    resetCompose();
+  };
+
+  const recipients = parseRecipients(composeTo);
+  // La dirección que se está escribiendo no se marca como mala hasta que se
+  // pasa a la siguiente o se sale del campo. Se mira también activeElement
+  // porque con autoFocus React no llama a onFocus.
+  const toHasFocus = isToFocused || (!!composeToRef.current && document.activeElement === composeToRef.current);
+  const typingToken =
+    toHasFocus && !/[,;\s]$/.test(composeTo) ? composeTo.split(/[,;\s]+/).pop()?.trim().toLowerCase() : undefined;
+  const shownInvalid = recipients.invalid.filter((e) => e !== typingToken);
+  const canSend =
+    isOnline &&
+    !isSending &&
+    recipients.valid.length > 0 &&
+    recipients.invalid.length === 0 &&
+    recipients.valid.length <= MAX_RECIPIENTS &&
+    !!composeSubject.trim() &&
+    !!composeBody.trim();
+
+  const handleSend = async () => {
+    if (isSending) return;
+    if (!isOnline) {
+      alert("No hay conexión. No se puede enviar el correo hasta que vuelva internet.");
+      return;
+    }
+
+    setIsSending(true);
+    setComposeError(null);
+    try {
+      const data = (await invokeInbox({
+        action: "send",
+        to: recipients.valid,
+        subject: composeSubject,
+        body: composeBody,
+      })) as { sent: string[]; failed: string[] };
+
+      const sent = data.sent ?? [];
+      const failed = data.failed ?? [];
+      const sentLabel = sent.length === 1 ? sent[0] : `${sent.length} direcciones`;
+
+      if (failed.length > 0) {
+        // Se deja el borrador solo con las que fallaron, para reintentarlo.
+        setComposeTo(failed.join(", "));
+        setComposeError(
+          `Enviado a ${sentLabel}, pero no se pudo enviar a: ${failed.join(", ")}. Se han dejado en Para para que lo reintentes.`
+        );
+        return;
+      }
+
+      resetCompose();
+      setSentNotice(`Correo enviado a ${sentLabel}.`);
+      // Se ve enseguida en Enviados.
+      setFolder("sent");
+      setPage(0);
+      setQueryInput("");
+      setQuery("");
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setComposeError(describeError(e));
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const total = list?.total ?? 0;
   const pageSize = list?.page_size ?? 25;
   const firstShown = total === 0 ? 0 : page * pageSize + 1;
@@ -447,7 +574,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
       )}
 
       {/* Carpeta y búsqueda */}
-      {openUid === null && (
+      {openUid === null && !isComposing && (
         <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex gap-2">
@@ -480,16 +607,29 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
                 );
               })}
             </div>
-            <button
-              type="button"
-              onClick={() => setReloadKey((k) => k + 1)}
-              disabled={!isOnline || isListLoading}
-              className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40"
-              aria-label="Actualizar"
-              title="Actualizar"
-            >
-              <RefreshCw size={18} className={isListLoading ? "animate-spin" : ""} />
-            </button>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setReloadKey((k) => k + 1)}
+                disabled={!isOnline || isListLoading}
+                className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                aria-label="Actualizar"
+                title="Actualizar"
+              >
+                <RefreshCw size={18} className={isListLoading ? "animate-spin" : ""} />
+              </button>
+              <button
+                type="button"
+                onClick={openCompose}
+                disabled={!isOnline}
+                className="p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm flex items-center gap-1.5 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+                aria-label="Redactar"
+                title="Redactar un correo nuevo"
+              >
+                <SquarePen size={16} />
+                <span className="hidden sm:inline">Redactar</span>
+              </button>
+            </div>
           </div>
 
           <form onSubmit={submitSearch} className="flex gap-2">
@@ -525,8 +665,25 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
         </div>
       )}
 
+      {sentNotice && openUid === null && !isComposing && (
+        <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center gap-2">
+          <CheckCircle2 size={18} className="shrink-0" />
+          <span className="flex-1">
+            {sentNotice} Queda en Enviados de {accountEmail}.
+          </span>
+          <button
+            type="button"
+            onClick={() => setSentNotice(null)}
+            className="p-1 rounded-lg hover:bg-green-100"
+            aria-label="Cerrar aviso"
+          >
+            <X size={14} />
+          </button>
+        </p>
+      )}
+
       {/* Lista */}
-      {openUid === null && (
+      {openUid === null && !isComposing && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {listError && (
             <div className="m-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3 space-y-1">
@@ -811,6 +968,118 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Correo nuevo */}
+      {isComposing && (
+        <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <SquarePen size={18} className="text-indigo-600" /> Nuevo correo
+            </h3>
+            <button
+              type="button"
+              onClick={discardCompose}
+              disabled={isSending}
+              className="p-2 rounded-xl hover:bg-slate-100 disabled:opacity-40"
+              aria-label="Descartar"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 min-w-0 text-sm">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Desde</p>
+            <p className="font-bold text-slate-800 truncate">{accountEmail}</p>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Para</label>
+            <input
+              type="text"
+              inputMode="email"
+              autoComplete="off"
+              className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
+              value={composeTo}
+              onChange={(e) => setComposeTo(e.target.value)}
+              ref={composeToRef}
+              onFocus={() => setIsToFocused(true)}
+              onBlur={() => setIsToFocused(false)}
+              placeholder="familia@ejemplo.com, otra@ejemplo.com"
+              autoFocus
+            />
+            {shownInvalid.length > 0 ? (
+              <p className="text-xs text-amber-700 mt-1 ml-1 break-all">
+                No parece una dirección válida: {shownInvalid.join(", ")}
+              </p>
+            ) : recipients.valid.length > MAX_RECIPIENTS ? (
+              <p className="text-xs text-amber-700 mt-1 ml-1">
+                Como mucho {MAX_RECIPIENTS} direcciones. Para escribir a grupos enteros usa "Contactar familias".
+              </p>
+            ) : (
+              recipients.valid.length > 1 && (
+                <p className="text-xs text-slate-500 mt-1 ml-1">
+                  {recipients.valid.length} direcciones. Cada una recibe su propio correo: nadie ve las demás.
+                </p>
+              )
+            )}
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Asunto</label>
+            <input
+              className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
+              value={composeSubject}
+              maxLength={MAX_SUBJECT_LENGTH}
+              onChange={(e) => setComposeSubject(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Mensaje</label>
+            <textarea
+              className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm min-h-[220px] resize-y"
+              value={composeBody}
+              maxLength={MAX_BODY_LENGTH}
+              onChange={(e) => setComposeBody(e.target.value)}
+            />
+          </div>
+
+          <p className="text-xs text-slate-500 flex items-start gap-2">
+            <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
+            Al final del correo se añade automáticamente la firma de protección de datos con el logo del Grupo Joven.
+          </p>
+
+          {composeError && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl p-3 whitespace-pre-line">
+              {composeError}
+            </p>
+          )}
+
+          <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+            <button
+              type="button"
+              onClick={discardCompose}
+              disabled={isSending}
+              className="px-4 py-2.5 rounded-xl font-bold text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+            >
+              Descartar
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSend()}
+              disabled={!canSend}
+              className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${
+                canSend
+                  ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-md"
+                  : "bg-slate-200 text-slate-500 cursor-not-allowed"
+              }`}
+            >
+              {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              {recipients.valid.length > 1 ? `Enviar a ${recipients.valid.length}` : "Enviar"}
+            </button>
+          </div>
         </div>
       )}
     </div>

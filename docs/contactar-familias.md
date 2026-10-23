@@ -2,9 +2,9 @@
 
 La página **Coordinación → Contactar familias** envía un correo a los `parent_email`
 de los niños de los grupos elegidos. La página **Coordinación → Correo** muestra el
-buzón de Gmail de esa misma cuenta (Recibidos y Enviados) y permite responder
-desde la app (ver [Correo](#correo-leer-y-responder) más abajo). Quién entra
-decide qué cuenta usa:
+buzón de Gmail de esa misma cuenta (Recibidos y Enviados) y permite responder y
+escribir correos nuevos desde la app (ver [Correo](#correo-leer-responder-y-escribir)
+más abajo). Quién entra decide qué cuenta usa:
 
 | Coordinador        | Grupos que puede elegir | Cuenta de envío             | Secret en Supabase           |
 |--------------------|-------------------------|-----------------------------|------------------------------|
@@ -116,7 +116,7 @@ el menú.
 
 ---
 
-## Correo: leer y responder
+## Correo: leer, responder y escribir
 
 La página **Correo** lee el buzón por IMAP con la **misma contraseña de
 aplicación** de cada cuenta (los secrets `SMTP_PASS_...` del paso 2): no hay que
@@ -129,6 +129,10 @@ la tabla de arriba.
   *Reply-To*). La respuesta sale desde la misma cuenta, con la firma de
   protección de datos y el correo original citado, y Gmail la agrupa en la misma
   conversación y la guarda en *Enviados*.
+- **Redactar**: correo nuevo a cualquier dirección (hasta 20 por envío), desde la
+  misma cuenta y con la firma de protección de datos. Si hay varias direcciones,
+  cada una recibe su propio correo y nadie ve las demás. Para escribir a grupos
+  enteros sigue estando *Contactar familias*.
 - **Seguridad**: el contenido de los correos se limpia antes de mostrarlo (sin
   scripts ni formularios) y las imágenes externas no se cargan hasta pulsar
   *Mostrar imágenes*, para que nadie sepa cuándo se ha abierto un correo.
