@@ -11,6 +11,7 @@ import type {
   FetchQueryObject,
   MessageAddressObject,
   MessageStructureObject,
+  SearchObject,
 } from "npm:imapflow@2.2.5";
 import type { QuotedMessage } from "../_shared/family-email-signature.ts";
 import { type FamilyMailAccount, getAppPassword } from "../_shared/family-mail-accounts.ts";
@@ -248,7 +249,17 @@ function replyRecipient(msg: FetchMessageObject, account: FamilyMailAccount): Ad
 // Acciones
 // ---------------------------------------------------------------------------
 
-export async function listMessages(client: ImapFlow, folder: Folder, page: number, query: string) {
+/**
+ * Una página de la carpeta, de más reciente a más antiguo. query es una
+ * búsqueda de Gmail y unreadOnly deja solo los no leídos; se pueden combinar.
+ */
+export async function listMessages(
+  client: ImapFlow,
+  folder: Folder,
+  page: number,
+  query: string,
+  unreadOnly = false
+) {
   // El contador de no leídos se pide antes de abrir la carpeta.
   const status = folder === "inbox" ? await client.status("INBOX", { unseen: true }) : false;
 
@@ -256,8 +267,11 @@ export async function listMessages(client: ImapFlow, folder: Folder, page: numbe
     let total = 0;
     let messages: FetchMessageObject[] = [];
 
-    if (query) {
-      const uids = ((await client.search({ gmraw: query }, { uid: true })) || []) as number[];
+    if (query || unreadOnly) {
+      const criteria: SearchObject = {};
+      if (query) criteria.gmraw = query;
+      if (unreadOnly) criteria.seen = false;
+      const uids = ((await client.search(criteria, { uid: true })) || []) as number[];
       uids.sort((a, b) => b - a);
       total = uids.length;
       const pageUids = uids.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);

@@ -304,6 +304,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
   const [page, setPage] = useState(0);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
+  // Solo en Recibidos: en Enviados se ignora.
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const [list, setList] = useState<ListResult | null>(null);
@@ -356,7 +358,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setIsListLoading(true);
     setListError(null);
 
-    invokeInbox({ action: "list", folder, page, query })
+    invokeInbox({ action: "list", folder, page, query, unread: folder === "inbox" && unreadOnly })
       .then((data) => {
         if (requestId !== listRequest.current) return;
         setList(data as ListResult);
@@ -370,7 +372,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
       .finally(() => {
         if (requestId === listRequest.current) setIsListLoading(false);
       });
-  }, [folder, page, query, reloadKey, isOnline]);
+  }, [folder, page, query, unreadOnly, reloadKey, isOnline]);
 
   // Mensaje abierto
   const messageRequest = useRef(0);
@@ -458,6 +460,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
           : l
       );
       if (data.unseen !== null) setInboxUnseen(data.unseen);
+      // Con "Solo no leídos", la lista cambia: se recarga para cuando se vuelva a ella.
+      if (unreadOnly && messageFolder === "inbox") setReloadKey((k) => k + 1);
     } catch (e) {
       alert(describeError(e));
     } finally {
@@ -735,6 +739,24 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
               Buscar
             </button>
           </form>
+
+          {folder === "inbox" && (
+            <button
+              type="button"
+              onClick={() => {
+                setUnreadOnly((v) => !v);
+                setPage(0);
+              }}
+              aria-pressed={unreadOnly}
+              className={`w-fit px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                unreadOnly
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Mail size={14} /> Solo no leídos
+            </button>
+          )}
         </div>
       )}
 
@@ -773,7 +795,11 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
 
           {list && list.messages.length === 0 && !isListLoading && (
             <p className="p-6 text-sm text-slate-500">
-              {query ? "Ningún correo coincide con la búsqueda." : "No hay correos en esta carpeta."}
+              {query
+                ? "Ningún correo coincide con la búsqueda."
+                : folder === "inbox" && unreadOnly
+                  ? "No hay correos sin leer."
+                  : "No hay correos en esta carpeta."}
             </p>
           )}
 

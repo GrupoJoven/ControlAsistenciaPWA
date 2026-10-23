@@ -4,7 +4,8 @@
 // misma desde la que envía "Contactar familias" (ver _shared/family-mail-accounts.ts).
 //
 // - action "list": una página de Recibidos o Enviados, con búsqueda opcional
-//   (admite lo mismo que el buscador de Gmail: palabras, from:, has:attachment...).
+//   (admite lo mismo que el buscador de Gmail: palabras, from:, has:attachment...)
+//   y, en Recibidos, el filtro unread: true para ver solo los no leídos.
 // - action "get": un mensaje con su texto, sus imágenes incrustadas y la lista
 //   de adjuntos.
 // - action "attachment": descarga un adjunto (respuesta binaria).
@@ -173,8 +174,10 @@ Deno.serve(async (req) => {
     if (action === "list") {
       const page = Number.isInteger(params.page) && params.page >= 0 ? params.page : 0;
       const query = String(params.query ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, MAX_QUERY_LENGTH);
-      const result = await listMessages(client, folder, page, query);
-      return jsonResponse({ ok: true, account: account.email, folder, query, ...result });
+      // "Solo no leídos" tiene sentido en Recibidos; en Enviados se ignora.
+      const unread = params.unread === true && folder === "inbox";
+      const result = await listMessages(client, folder, page, query, unread);
+      return jsonResponse({ ok: true, account: account.email, folder, query, unread, ...result });
     }
 
     if (action === "get") {
