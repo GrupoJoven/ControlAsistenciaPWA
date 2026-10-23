@@ -132,9 +132,16 @@ la tabla de arriba.
   protección de datos y el correo original citado, y Gmail la agrupa en la misma
   conversación y la guarda en *Enviados*.
 - **Redactar**: correo nuevo a cualquier dirección (hasta 20 por envío), desde la
-  misma cuenta y con la firma de protección de datos. Si hay varias direcciones,
-  cada una recibe su propio correo y nadie ve las demás. Para escribir a grupos
-  enteros sigue estando *Contactar familias*.
+  misma cuenta y con la firma de protección de datos. Con varias direcciones va
+  por defecto en **copia oculta (CCO)**: nadie ve las de los demás. Si se
+  desmarca la casilla, todas van en *Para* y se ven entre sí. Para escribir a
+  grupos enteros sigue estando *Contactar familias*.
+  - En Enviados de Gmail, un correo en CCO aparece sin la lista de
+    destinatarios ocultos: los servidores de correo quitan esa información al
+    enviar para que no pueda llegar a nadie. La app muestra las direcciones al
+    terminar el envío.
+- **Adjuntos**: al redactar y al responder se pueden adjuntar hasta 10 archivos,
+  20 MB en total (Gmail admite unos 25 MB por correo contando la codificación).
 - **Seguridad**: el contenido de los correos se limpia antes de mostrarlo (sin
   scripts ni formularios) y las imágenes externas no se cargan hasta pulsar
   *Mostrar imágenes*, para que nadie sepa cuándo se ha abierto un correo.

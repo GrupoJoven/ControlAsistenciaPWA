@@ -28,6 +28,10 @@ import { FAMILY_EMAIL_SENDERS } from "./FamilyContact";
 const MAX_BODY_LENGTH = 20000;
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_RECIPIENTS = 20;
+// Mismos límites que supabase/functions/family-inbox/outbox.ts.
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENTS_MB = 20;
+const MAX_ATTACHMENTS_BYTES = MAX_ATTACHMENTS_MB * 1024 * 1024;
 
 const EMAIL_RE = /^[^\s@<>()[\],;:"]+@[^\s@<>()[\],;:"]+\.[^\s@<>()[\],;:"]+$/;
 
@@ -92,9 +96,21 @@ class InboxError extends Error {
   }
 }
 
-/** Llama a la edge function family-inbox, que decide qué buzón le toca a cada coordinador. */
-const invokeInbox = async (payload: Record<string, unknown>) => {
-  const { data, error } = await supabase.functions.invoke("family-inbox", { body: payload });
+/**
+ * Llama a la edge function family-inbox, que decide qué buzón le toca a cada
+ * coordinador. Con adjuntos va como multipart/form-data; los nombres de los
+ * archivos viajan también en el JSON porque el parser de Deno los corta en ";".
+ */
+const invokeInbox = async (payload: Record<string, unknown>, files: File[] = []) => {
+  let body: Record<string, unknown> | FormData = payload;
+  if (files.length > 0) {
+    const form = new FormData();
+    form.append("payload", JSON.stringify({ ...payload, attachment_names: files.map((f) => f.name) }));
+    files.forEach((f) => form.append("attachments", f));
+    body = form;
+  }
+
+  const { data, error } = await supabase.functions.invoke("family-inbox", { body });
 
   if (error) {
     // En errores HTTP, supabase-js deja la respuesta original en error.context.
@@ -136,6 +152,10 @@ const describeError = (e: unknown): string => {
       return "No se encuentra ese adjunto en el correo.";
     case "attachment_too_large":
       return "El adjunto es demasiado grande para descargarlo desde la app. Ábrelo desde Gmail.";
+    case "too_many_attachments":
+      return `Como mucho ${d.max ?? MAX_ATTACHMENTS} archivos por correo.`;
+    case "attachments_too_large":
+      return `Los adjuntos no pueden pasar de ${d.max_mb ?? MAX_ATTACHMENTS_MB} MB en total.`;
     case "flag_update_failed":
       return "Gmail no ha dejado cambiar si este correo está leído. Inténtalo de nuevo o hazlo desde Gmail.";
     case "no_reply_recipient":
@@ -279,6 +299,85 @@ const addressLabel = (a: Address | null | undefined) => (a ? a.name || a.address
 
 const addressFull = (a: Address) => (a.name ? `${a.name} <${a.address}>` : a.address);
 
+/** Botón "Adjuntar archivos" y los archivos elegidos, con los límites de la edge function. */
+const AttachmentPicker: React.FC<{ files: File[]; onChange: (files: File[]) => void; disabled?: boolean }> = ({
+  files,
+  onChange,
+  disabled,
+}) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+
+  const add = (list: FileList | null) => {
+    if (list?.length) {
+      const next = [...files, ...Array.from(list)];
+      if (next.length > MAX_ATTACHMENTS) {
+        setError(`Como mucho ${MAX_ATTACHMENTS} archivos por correo.`);
+      } else if (next.reduce((sum, f) => sum + f.size, 0) > MAX_ATTACHMENTS_BYTES) {
+        setError(`Los adjuntos no pueden pasar de ${MAX_ATTACHMENTS_MB} MB en total.`);
+      } else {
+        setError(null);
+        onChange(next);
+      }
+    }
+    // Para poder volver a elegir el mismo archivo después de quitarlo.
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const remove = (index: number) => {
+    setError(null);
+    onChange(files.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={disabled}
+          className="px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <Paperclip size={14} /> Adjuntar archivos
+        </button>
+        {files.length > 0 && (
+          <span className="text-xs text-slate-400">
+            {formatSize(total)} de {MAX_ATTACHMENTS_MB} MB
+          </span>
+        )}
+        <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => add(e.target.files)} />
+      </div>
+
+      {files.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {files.map((f, i) => (
+            <span
+              key={`${f.name}-${f.size}-${i}`}
+              className="max-w-full pl-3 pr-1 py-1 rounded-xl text-xs font-bold border border-slate-200 bg-slate-50 text-slate-700 flex items-center gap-1.5"
+            >
+              <Paperclip size={12} className="shrink-0" />
+              <span className="truncate">{f.name}</span>
+              <span className="font-normal text-slate-400 shrink-0">{formatSize(f.size)}</span>
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                disabled={disabled}
+                className="p-1 rounded-lg hover:bg-slate-200 disabled:opacity-50"
+                aria-label={`Quitar ${f.name}`}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="text-xs text-amber-700">{error}</p>}
+    </div>
+  );
+};
+
 // ---------------------------------------------------------------------------
 
 const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
@@ -309,6 +408,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
 
   const [isReplyOpen, setIsReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [isReplying, setIsReplying] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replySentTo, setReplySentTo] = useState<string | null>(null);
@@ -318,6 +418,9 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
   const [isToFocused, setIsToFocused] = useState(false);
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
+  const [composeFiles, setComposeFiles] = useState<File[]>([]);
+  // Con varias direcciones, por defecto en copia oculta.
+  const [hideRecipients, setHideRecipients] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
   const [sentNotice, setSentNotice] = useState<string | null>(null);
@@ -396,6 +499,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     setShowImages(false);
     setIsReplyOpen(false);
     setReplyBody("");
+    setReplyFiles([]);
     setReplyError(null);
     setReplySentTo(null);
     topRef.current?.scrollIntoView({ block: "start" });
@@ -480,9 +584,10 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     setIsReplying(true);
     setReplyError(null);
     try {
-      const data = await invokeInbox({ action: "reply", uid: message.uid, body: replyBody });
+      const data = await invokeInbox({ action: "reply", uid: message.uid, body: replyBody }, replyFiles);
       setReplySentTo((data as any).to ?? message.reply_to?.address ?? "");
       setReplyBody("");
+      setReplyFiles([]);
       setIsReplyOpen(false);
     } catch (e) {
       setReplyError(describeError(e));
@@ -504,12 +609,14 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     setComposeTo("");
     setComposeSubject("");
     setComposeBody("");
+    setComposeFiles([]);
+    setHideRecipients(true);
     setComposeError(null);
   };
 
   const discardCompose = () => {
     if (isSending) return;
-    const hasDraft = composeTo.trim() || composeSubject.trim() || composeBody.trim();
+    const hasDraft = composeTo.trim() || composeSubject.trim() || composeBody.trim() || composeFiles.length > 0;
     if (hasDraft && !window.confirm("¿Descartar este correo?")) return;
     resetCompose();
   };
@@ -541,12 +648,16 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
     setIsSending(true);
     setComposeError(null);
     try {
-      const data = (await invokeInbox({
-        action: "send",
-        to: recipients.valid,
-        subject: composeSubject,
-        body: composeBody,
-      })) as { sent: string[]; failed: string[] };
+      const data = (await invokeInbox(
+        {
+          action: "send",
+          to: recipients.valid,
+          subject: composeSubject,
+          body: composeBody,
+          hide_recipients: hideRecipients,
+        },
+        composeFiles
+      )) as { sent: string[]; failed: string[]; hidden: boolean };
 
       const sent = data.sent ?? [];
       const failed = data.failed ?? [];
@@ -562,7 +673,12 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
       }
 
       resetCompose();
-      setSentNotice(`Correo enviado a ${sentLabel}.`);
+      // En CCO, Gmail no guarda en Enviados a quién se mandó: se dice aquí.
+      setSentNotice(
+        data.hidden
+          ? `Correo enviado en copia oculta (CCO) a: ${sent.join(", ")}. En Enviados de Gmail no se verán estas direcciones.`
+          : `Correo enviado a ${sentLabel}. Queda en Enviados de ${accountEmail}.`
+      );
       // Se ve enseguida en Enviados.
       setFolder("sent");
       setPage(0);
@@ -704,9 +820,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
       {sentNotice && openUid === null && !isComposing && (
         <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-2xl p-4 flex items-center gap-2">
           <CheckCircle2 size={18} className="shrink-0" />
-          <span className="flex-1">
-            {sentNotice} Queda en Enviados de {accountEmail}.
-          </span>
+          <span className="flex-1 break-words min-w-0">{sentNotice}</span>
           <button
             type="button"
             onClick={() => setSentNotice(null)}
@@ -747,7 +861,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               {list.messages.map((m) => {
                 const who =
                   folder === "sent"
-                    ? `Para: ${m.to.map(addressLabel).join(", ") || "(sin destinatario)"}`
+                    ? `Para: ${m.to.map(addressLabel).join(", ") || "destinatarios ocultos (CCO)"}`
                     : addressLabel(m.from) || "(sin remitente)";
                 const unread = folder === "inbox" && !m.seen;
 
@@ -876,7 +990,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
                   </p>
                 )}
                 <p className="text-xs text-slate-500 break-all">
-                  Para: {message.to.map(addressFull).join(", ") || "—"}
+                  Para: {message.to.map(addressFull).join(", ") || "destinatarios ocultos (CCO)"}
                   {message.cc.length > 0 && <> · Cc: {message.cc.map(addressFull).join(", ")}</>}
                 </p>
                 <p className="text-xs text-slate-400 first-letter:uppercase">{formatFullDate(message.date)}</p>
@@ -980,6 +1094,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
                         placeholder="Escribe tu respuesta…"
                         autoFocus
                       />
+                      <AttachmentPicker files={replyFiles} onChange={setReplyFiles} disabled={isReplying} />
                       <p className="text-xs text-slate-500 flex items-start gap-2">
                         <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
                         Se añade la firma de protección de datos y, debajo, el correo original citado. Gmail la
@@ -1075,9 +1190,22 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               </p>
             ) : (
               recipients.valid.length > 1 && (
-                <p className="text-xs text-slate-500 mt-1 ml-1">
-                  {recipients.valid.length} direcciones. Cada una recibe su propio correo: nadie ve las demás.
-                </p>
+                <div className="mt-2 ml-1 space-y-1">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer w-fit">
+                    <input
+                      type="checkbox"
+                      checked={hideRecipients}
+                      onChange={(e) => setHideRecipients(e.target.checked)}
+                      className="w-4 h-4 accent-indigo-600"
+                    />
+                    Enviar en copia oculta (CCO)
+                  </label>
+                  <p className={`text-xs ${hideRecipients ? "text-slate-500" : "text-amber-700"}`}>
+                    {hideRecipients
+                      ? `Las ${recipients.valid.length} direcciones van ocultas: nadie ve las de los demás.`
+                      : `Las ${recipients.valid.length} direcciones irán en Para y todos verán las de los demás.`}
+                  </p>
+                </div>
               )
             )}
           </div>
@@ -1101,6 +1229,8 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline }) => {
               onChange={(e) => setComposeBody(e.target.value)}
             />
           </div>
+
+          <AttachmentPicker files={composeFiles} onChange={setComposeFiles} disabled={isSending} />
 
           <p className="text-xs text-slate-500 flex items-start gap-2">
             <ShieldCheck size={14} className="text-indigo-600 shrink-0 mt-0.5" />
