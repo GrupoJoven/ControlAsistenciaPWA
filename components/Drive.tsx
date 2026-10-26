@@ -20,6 +20,7 @@ import {
   FileJson,
   FileSymlink,
   File,
+  Link as LinkIcon,
 } from "lucide-react";
 import {
   getGoogleDriveConnection,
