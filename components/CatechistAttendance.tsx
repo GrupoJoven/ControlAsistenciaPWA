@@ -7,6 +7,8 @@ import {
   Church,
   BookOpen,
   Clock,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { User, ParishEvent, AttendanceStatus, getTodayStr } from "../types";
 import { STAGE_LABELS, eventAppliesToStages } from "../src/utils/stages";
@@ -20,7 +22,8 @@ interface CatechistAttendanceProps {
     type: "class" | "event",
     status: AttendanceStatus,
     refId?: string,
-    subType?: "catechism" | "mass"
+    subType?: "catechism" | "mass",
+    date?: string
   ) => void;
 }
 
@@ -35,9 +38,35 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
 }) => {
   const [mode, setMode] = useState<"class" | "event">("class");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const today = getTodayStr();
-  const isClassDay = classDays.includes(today);
+
+  // Días lectivos del curso que ya han llegado, del más reciente al más
+  // antiguo. Solo se pasa lista en días lectivos porque son los únicos que
+  // cuentan para el % de asistencia del catequista.
+  const pastClassDays = useMemo(
+    () => classDays.filter((d) => d <= today).sort((a, b) => b.localeCompare(a)),
+    [classDays, today]
+  );
+
+  // Por defecto, hoy si es lectivo o, si no, el último día lectivo. Si se cambia
+  // de curso y el día elegido ya no está en la lista, se vuelve al por defecto.
+  const activeDate =
+    selectedDate && pastClassDays.includes(selectedDate)
+      ? selectedDate
+      : pastClassDays[0] ?? null;
+  const activeIndex = activeDate ? pastClassDays.indexOf(activeDate) : -1;
+  const olderDate = activeIndex >= 0 ? pastClassDays[activeIndex + 1] ?? null : null;
+  const newerDate = activeIndex > 0 ? pastClassDays[activeIndex - 1] : null;
+
+  const formatDate = (dateStr: string, style: "short" | "long") =>
+    new Date(`${dateStr}T12:00:00`).toLocaleDateString(
+      "es-ES",
+      style === "long"
+        ? { weekday: "long", year: "numeric", month: "long", day: "numeric" }
+        : { weekday: "short", year: "numeric", month: "short", day: "numeric" }
+    );
 
   /**
    * IMPORTANTE:
@@ -55,9 +84,9 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
     const m = new Map<string, ClassDayRow>();
 
     for (const u of users) {
-      // Recoge SOLO el registro de hoy tipo class
+      // Recoge SOLO el registro tipo class del día seleccionado
       const h = u.attendanceHistory?.find(
-        (x: any) => x.date === today && x.type === "class"
+        (x: any) => x.date === activeDate && x.type === "class"
       );
 
       // Si no hay registro, tratamos como absent
@@ -68,7 +97,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
     }
 
     return m;
-  }, [users, today]);
+  }, [users, activeDate]);
 
   const eventByUserAndEvent = useMemo(() => {
     const m = new Map<string, AttendanceStatus>(); // key: userId|eventId
@@ -94,7 +123,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   };
 
   const canShowTable =
-    (mode === "class" && isClassDay) || (mode === "event" && selectedEventId);
+    (mode === "class" && activeDate) || (mode === "event" && selectedEventId);
 
   // En un evento de una sola etapa solo se pasa lista a la gente de esa etapa:
   // a un catequista de preconfirmación no se le apunta falta en un evento de
@@ -131,6 +160,42 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
           </button>
         </div>
 
+        {mode === "class" && activeDate && (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => olderDate && setSelectedDate(olderDate)}
+              disabled={!olderDate}
+              title="Día lectivo anterior"
+              aria-label="Día lectivo anterior"
+              className="p-2 rounded-xl bg-slate-50 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <select
+              className="flex-1 sm:flex-none min-w-0 px-4 py-2 border rounded-xl text-sm outline-none bg-slate-50 focus:ring-2 focus:ring-indigo-500"
+              value={activeDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              aria-label="Día lectivo"
+            >
+              {pastClassDays.map((d) => (
+                <option key={d} value={d}>
+                  {formatDate(d, "short")}
+                  {d === today ? " (hoy)" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => newerDate && setSelectedDate(newerDate)}
+              disabled={!newerDate}
+              title="Día lectivo siguiente"
+              aria-label="Día lectivo siguiente"
+              className="p-2 rounded-xl bg-slate-50 text-slate-500 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        )}
+
         {mode === "event" && (
           <select
             className="w-full sm:w-auto px-4 py-2 border rounded-xl text-sm outline-none bg-slate-50 focus:ring-2 focus:ring-indigo-500"
@@ -147,13 +212,22 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
         )}
       </div>
 
-      {mode === "class" && !isClassDay && (
+      {mode === "class" && !activeDate && (
         <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border-2 border-dashed border-slate-100">
           <Calendar size={48} className="mx-auto mb-4 opacity-20" />
-          <p className="font-bold">Hoy no es día lectivo registrado</p>
+          <p className="font-bold">No hay días lectivos para pasar lista</p>
           <p className="text-xs sm:text-sm">
-            Registro habilitado solo en días lectivos.
+            Todavía no ha llegado ningún día lectivo de este curso.
           </p>
+        </div>
+      )}
+
+      {mode === "class" && activeDate && activeDate !== today && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
+          Estás editando la asistencia del{" "}
+          <span className="font-bold">{formatDate(activeDate, "long")}</span>
+          {pastClassDays.includes(today) ? ", no la de hoy" : ""}. Los cambios
+          se guardan en cuanto pulsas.
         </div>
       )}
 
@@ -222,7 +296,8 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
                                 "class",
                                 cycleStatus(row.catechism),
                                 undefined,
-                                "catechism"
+                                "catechism",
+                                activeDate ?? undefined
                               )
                             }
                             className={`p-1.5 sm:p-3 rounded-lg sm:rounded-xl transition-all flex flex-col items-center gap-0.5 sm:gap-1 w-12 sm:w-24 ${getStatusStyle(
@@ -251,7 +326,8 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
                                 "class",
                                 cycleStatus(row.mass),
                                 undefined,
-                                "mass"
+                                "mass",
+                                activeDate ?? undefined
                               )
                             }
                             className={`p-1.5 sm:p-3 rounded-lg sm:rounded-xl transition-all flex flex-col items-center gap-0.5 sm:gap-1 w-12 sm:w-24 ${getStatusStyle(

@@ -742,7 +742,8 @@ const App: React.FC = () => {
     type: "class" | "event",
     status: AttendanceStatus,
     refId?: string,
-    subType?: "catechism" | "mass"
+    subType?: "catechism" | "mass",
+    date?: string
   ) => {
     if (blockIfOffline("guardar la asistencia del catequista")) return;
     const today = getTodayStr();
@@ -752,22 +753,26 @@ const App: React.FC = () => {
       if (type === "class") {
         if (!subType) return;
 
+        // Día lectivo al que se pasa lista: hoy, salvo que se esté corrigiendo
+        // otro día desde el selector de fecha.
+        const classDate = date ?? today;
+
         // IMPORTANTE: no pisar el otro campo.
-        // Busca el “estado actual” local del catequista para HOY.
+        // Busca el “estado actual” del catequista para ese día.
         // Ajusta 'users' y el shape de attendanceHistory a tu modelo real.
         const u = users.find((x: any) => x.id === profileId);
         const { data: current, error: readErr } = await supabase
           .from("catechist_attendance")
           .select("catechism, mass")
           .eq("profile_id", profileId)
-          .eq("date", today)
+          .eq("date", classDate)
           .maybeSingle();
 
         if (readErr) throw readErr;
 
         const next = {
           profile_id: profileId,
-          date: today,
+          date: classDate,
           catechism: subType === "catechism" ? safeStatus : (current?.catechism ?? "absent"),
           mass:      subType === "mass"     ? safeStatus : (current?.mass      ?? "absent"),
         };
@@ -784,12 +789,12 @@ const App: React.FC = () => {
             if (x.id !== profileId) return x;
             const hist = Array.isArray(x.attendanceHistory) ? [...x.attendanceHistory] : [];
 
-            // elimina el registro "class de hoy" anterior (si existía)
-            const filtered = hist.filter((h: any) => !(h.type === "class" && h.date === today));
+            // elimina el registro "class" anterior de ese día (si existía)
+            const filtered = hist.filter((h: any) => !(h.type === "class" && h.date === classDate));
 
             filtered.push({
               type: "class",
-              date: today,
+              date: classDate,
               catechism: next.catechism,
               mass: next.mass,
             });
