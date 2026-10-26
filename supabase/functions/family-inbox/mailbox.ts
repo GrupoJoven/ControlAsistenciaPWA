@@ -254,12 +254,26 @@ export const CATEGORIES = ["primary", "social", "promotions", "updates"] as cons
 export type Category = (typeof CATEGORIES)[number];
 export const isCategory = (v: unknown): v is Category => CATEGORIES.includes(v as Category);
 
+/**
+ * Búsqueda de cada pestaña. Principal no es "category:primary": Gmail solo da
+ * esa categoría a parte del correo (a nada si la cuenta tiene las pestañas
+ * desactivadas, y nunca a lo de Foros), y el resto no salía en ninguna pestaña,
+ * solo en "Todas las bandejas". Como en Gmail, Principal es todo lo que no está
+ * en otra pestaña, así entre las cuatro está todo Recibidos.
+ */
+const CATEGORY_RAW: Record<Category, string> = {
+  primary: "-category:social -category:promotions -category:updates",
+  social: "category:social",
+  promotions: "category:promotions",
+  updates: "category:updates",
+};
+
 /** No leídos de cada pestaña. Necesita Recibidos abierto; null si el servidor no es Gmail. */
 async function unseenByCategory(client: ImapFlow): Promise<Record<Category, number> | null> {
   try {
     const counts = {} as Record<Category, number>;
     for (const c of CATEGORIES) {
-      const uids = await client.search({ gmraw: `category:${c}`, seen: false }, { uid: true });
+      const uids = await client.search({ gmraw: CATEGORY_RAW[c], seen: false }, { uid: true });
       counts[c] = Array.isArray(uids) ? uids.length : 0;
     }
     return counts;
@@ -295,7 +309,7 @@ export async function listMessages(
 
     if (query || unreadOnly || category) {
       const criteria: SearchObject = {};
-      const raw = [category ? `category:${category}` : "", query].filter(Boolean).join(" ");
+      const raw = [category ? CATEGORY_RAW[category] : "", query].filter(Boolean).join(" ");
       if (raw) criteria.gmraw = raw;
       if (unreadOnly) criteria.seen = false;
       const uids = ((await client.search(criteria, { uid: true })) || []) as number[];

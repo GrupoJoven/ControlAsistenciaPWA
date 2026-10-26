@@ -148,9 +148,10 @@ cuenta. Un coordinador de etapa no puede abrir el buzón de la otra.
 - **Pestañas**: Recibidos se divide como en Gmail en *Principal* (la que se abre
   por defecto), *Social*, *Promociones*, *Notificaciones* y *Todas las bandejas*,
   cada una con sus no leídos. La clasificación es la de Gmail: si un correo cae
-  en la pestaña equivocada, se corrige desde Gmail. Al buscar se busca en todas
-  las pestañas. Si en Gmail se han desactivado las pestañas, puede que
-  *Principal* salga vacía: entonces hay que usar *Todas las bandejas*.
+  en la pestaña equivocada, se corrige desde Gmail. *Principal* es todo lo que
+  no está en Social, Promociones ni Notificaciones (también lo de *Foros* y, si
+  la cuenta tiene las pestañas desactivadas en Gmail, casi todo), así que entre
+  las cuatro está todo Recibidos. Al buscar se busca en todas las pestañas.
 - **Responder**: solo a correos de Recibidos y solo al remitente (o a su
   *Reply-To*). La respuesta sale desde la misma cuenta, con la firma de
   protección de datos y el correo original citado, y Gmail la agrupa en la misma
