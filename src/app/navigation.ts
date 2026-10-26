@@ -83,6 +83,8 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     label: "Supercoordinación",
     accent: "supercoordinator",
     items: [
+      { view: "super-inbox-communion", label: "Correo de comunión", icon: Inbox, globalCoordinatorOnly: true },
+      { view: "super-inbox-postcommunion", label: "Correo de postcomunión", icon: Inbox, globalCoordinatorOnly: true },
       { view: "super-inbox-preconfirmation", label: "Correo de preconfirmación", icon: Inbox, globalCoordinatorOnly: true },
       { view: "super-inbox-confirmation", label: "Correo de confirmación", icon: Inbox, globalCoordinatorOnly: true },
       { view: "super-coordinators", label: "Coordinadores", icon: UserCog, globalCoordinatorOnly: true },

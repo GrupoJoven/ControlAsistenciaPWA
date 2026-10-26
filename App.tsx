@@ -1903,6 +1903,22 @@ const App: React.FC = () => {
               onDraftUsed={() => setMailDraft(null)}
             />
           )}
+          {currentView === 'super-inbox-communion' && isGlobal && (
+            <FamilyInbox
+              key="super-inbox-communion"
+              currentUser={currentUser}
+              isOnline={isOnline}
+              mailbox="communion"
+            />
+          )}
+          {currentView === 'super-inbox-postcommunion' && isGlobal && (
+            <FamilyInbox
+              key="super-inbox-postcommunion"
+              currentUser={currentUser}
+              isOnline={isOnline}
+              mailbox="postcommunion"
+            />
+          )}
           {currentView === 'super-inbox-preconfirmation' && isGlobal && (
             <FamilyInbox
               key="super-inbox-preconfirmation"

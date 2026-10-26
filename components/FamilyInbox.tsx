@@ -28,7 +28,7 @@ import {
 import { supabase } from "../src/lib/supabaseClient";
 import { User } from "../types";
 import { Stage, isGlobalCoordinator } from "../src/utils/stages";
-import { FAMILY_EMAIL_SENDERS } from "./FamilyContact";
+import { FAMILY_EMAIL_SENDERS, type FamilyMailbox } from "./FamilyContact";
 import AttachmentPicker, {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_MB,
@@ -65,10 +65,10 @@ interface FamilyInboxProps {
   currentUser: User;
   isOnline: boolean;
   /**
-   * Supercoordinación: el coordinador general abre el buzón de esta etapa en
-   * vez del suyo. La edge function solo se lo permite a él.
+   * Supercoordinación: el coordinador general abre este buzón en vez del suyo.
+   * La edge function solo se lo permite a él.
    */
-  mailbox?: Stage;
+  mailbox?: FamilyMailbox;
   /** Si llega, Correo se abre directamente en Redactar con estos datos. */
   initialDraft?: MailDraft | null;
   /** Avisa de que el borrador ya se ha usado, para no volver a abrirlo. */
@@ -198,7 +198,7 @@ const describeError = (e: unknown): string => {
     case "forbidden":
       return "Solo los coordinadores pueden ver el correo.";
     case "mailbox_not_allowed":
-      return "Solo un coordinador general puede abrir el buzón de otra etapa.";
+      return "Solo un coordinador general puede abrir otros buzones.";
     case "invalid_or_missing_jwt":
       return "Tu sesión ha caducado. Cierra sesión y vuelve a entrar.";
     default:

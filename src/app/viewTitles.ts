@@ -14,6 +14,8 @@ export const VIEW_TITLES: Record<View, string> = {
   "catechist-attendance": "Asistencia del Equipo",
   "family-contact": "Contactar familias",
   "family-inbox": "Correo",
+  "super-inbox-communion": "Correo de comunión",
+  "super-inbox-postcommunion": "Correo de postcomunión",
   "super-inbox-preconfirmation": "Correo de preconfirmación",
   "super-inbox-confirmation": "Correo de confirmación",
   "super-coordinators": "Coordinadores de etapa",

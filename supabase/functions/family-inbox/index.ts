@@ -2,8 +2,9 @@
 //
 // "Correo": cada coordinador lee y responde el buzón de Gmail de su cuenta, la
 // misma desde la que envía "Contactar familias" (ver _shared/family-mail-accounts.ts).
-// En Supercoordinación, el coordinador general puede pedir además el buzón de
-// una etapa con mailbox: "preconfirmation" | "confirmation" en cualquier acción.
+// En Supercoordinación, el coordinador general puede pedir además otro buzón
+// con mailbox: "preconfirmation" | "confirmation" | "communion" | "postcommunion"
+// en cualquier acción.
 //
 // - action "list": una página de Recibidos o Enviados, con búsqueda opcional
 //   (admite lo mismo que el buscador de Gmail: palabras, from:, has:attachment...)
@@ -28,7 +29,7 @@
 // quién llama, qué buzón le toca y qué se pide.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ImapFlow } from "npm:imapflow@2.2.5";
-import { FAMILY_MAIL_ACCOUNTS, type Stage } from "../_shared/family-mail-accounts.ts";
+import { FAMILY_MAIL_ACCOUNTS, MAILBOXES, type Mailbox, type Stage } from "../_shared/family-mail-accounts.ts";
 import {
   type Folder,
   InboxError,
@@ -122,16 +123,16 @@ Deno.serve(async (req) => {
     // 2) Parámetros
     const { params, files } = await readMailRequest(req);
 
-    // Qué buzón: el suyo o, si es el coordinador general, el de la etapa que pida.
-    // Un coordinador de etapa no puede abrir el de la otra.
-    const mailbox = params?.mailbox ?? null;
-    if (mailbox !== null && mailbox !== "preconfirmation" && mailbox !== "confirmation") {
+    // Qué buzón: el suyo o, si es el coordinador general, el que pida. Un
+    // coordinador de etapa solo puede pedir el suyo.
+    const mailbox: Mailbox | null = params?.mailbox ?? null;
+    if (mailbox !== null && !MAILBOXES.includes(mailbox)) {
       return jsonResponse({ ok: false, error: "invalid_mailbox" }, 400);
     }
     if (mailbox && callerStage && mailbox !== callerStage) {
       return jsonResponse({ ok: false, error: "mailbox_not_allowed" }, 403);
     }
-    const account = FAMILY_MAIL_ACCOUNTS[(mailbox as Stage | null) ?? callerStage ?? "global"];
+    const account = FAMILY_MAIL_ACCOUNTS[mailbox ?? callerStage ?? "global"];
 
     const action = params?.action;
     if (!["list", "get", "attachment", "mark", "reply", "send"].includes(action)) {

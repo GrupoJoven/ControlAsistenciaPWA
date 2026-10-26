@@ -29,7 +29,8 @@ Para que funcione hay que hacer **una sola vez** los pasos siguientes.
 ## 1. Crear una contraseña de aplicación en cada cuenta de Gmail
 
 Hay que repetirlo en las tres cuentas (`preconfirmacion@`, `confirmacion@` y
-`grupojoven@`), entrando cada vez con la cuenta correspondiente. Lo más cómodo
+`grupojoven@`), y también en `comunion@` y `postcomunion@` para sus buzones en
+Supercoordinación, entrando cada vez con la cuenta correspondiente. Lo más cómodo
 es una ventana de incógnito por cuenta.
 
 1. **Activar la verificación en dos pasos** (si la cuenta no la tiene ya):
@@ -57,7 +58,7 @@ es una ventana de incógnito por cuenta.
 1. Abre los secrets de las edge functions del proyecto:
    <https://supabase.com/dashboard/project/pqycvrpdyebshkfaxzmi/functions/secrets>
    (o *Edge Functions → Secrets* en el panel).
-2. Añade estos tres secrets (da igual pegar la contraseña con o sin los
+2. Añade estos secrets (da igual pegar la contraseña con o sin los
    espacios que muestra Google):
 
    | Name                         | Value                                   |
@@ -65,6 +66,8 @@ es una ventana de incógnito por cuenta.
    | `SMTP_PASS_PRECONFIRMACION`  | contraseña de `preconfirmacion@sanpas.es` |
    | `SMTP_PASS_CONFIRMACION`     | contraseña de `confirmacion@sanpas.es`    |
    | `SMTP_PASS_GRUPOJOVEN`       | contraseña de `grupojoven@sanpas.es`      |
+   | `SMTP_PASS_COMUNION`         | contraseña de `comunion@sanpas.es`        |
+   | `SMTP_PASS_POSTCOMUNION`     | contraseña de `postcomunion@sanpas.es`    |
 
 3. Guarda. No hace falta tocar `SMTP_HOST` ni `SMTP_PORT` (ya existen para los
    avisos de ausencia; si no estuvieran, se usa `smtp.gmail.com` y el puerto 465).
@@ -136,10 +139,13 @@ crear nada nuevo. Cada coordinador ve solo el buzón de su cuenta, igual que en
 la tabla de arriba.
 
 El coordinador general tiene además, en **Supercoordinación**, las páginas
-*Correo de preconfirmación* y *Correo de confirmación*: son la misma página
-Correo, pero con el buzón de esa etapa (`preconfirmacion@` o `confirmacion@`),
+*Correo de comunión*, *Correo de postcomunión*, *Correo de preconfirmación* y
+*Correo de confirmación*: son la misma página Correo, pero con el buzón de esa
+cuenta (`comunion@`, `postcomunion@`, `preconfirmacion@` o `confirmacion@`),
 igual que la vería su coordinador. Lo que responda o envíe desde ahí sale de esa
-cuenta. Un coordinador de etapa no puede abrir el buzón de la otra.
+cuenta. Un coordinador de etapa no puede abrir el buzón de la otra. Comunión y
+postcomunión no tienen coordinadores en la app: sus buzones solo se ven desde
+Supercoordinación y no se usan en *Contactar familias*.
 
 - **Leído / no leído**: abrir un correo **no lo marca como leído** en Gmail. Para
   eso está el botón *Marcar como leído* (o *Marcar como no leído*) del propio
@@ -172,7 +178,7 @@ cuenta. Un coordinador de etapa no puede abrir el buzón de la otra.
   *Mostrar imágenes*, para que nadie sepa cuándo se ha abierto un correo.
 - **Protección de datos**: cualquier coordinador de una etapa ve **todo** el
   buzón de esa cuenta, incluidas las respuestas de las familias. Los
-  coordinadores generales ven los tres buzones.
+  coordinadores generales ven los cinco buzones.
 
 ### Requisito: IMAP permitido en Google Workspace
 
@@ -180,7 +186,7 @@ Si al abrir *Correo* aparece *"La cuenta ... no tiene permitido el acceso IMAP"*
 el administrador de Google Workspace de `sanpas.es` tiene que permitirlo en
 *Consola de administración → Aplicaciones → Google Workspace → Gmail → Acceso de
 usuarios finales → Acceso POP e IMAP* (marcar *Habilitar el acceso IMAP para todos
-los usuarios*, o al menos para estas tres cuentas).
+los usuarios*, o al menos para estas cinco cuentas).
 
 ### Problemas habituales
 

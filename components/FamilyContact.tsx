@@ -20,14 +20,20 @@ import AttachmentPicker, {
   withAttachments,
 } from "./AttachmentPicker";
 
+/** Buzones que el coordinador general puede abrir en Supercoordinación. */
+export type FamilyMailbox = Stage | "communion" | "postcommunion";
+
 /**
  * Cuenta desde la que escribe cada coordinador (y cuyo buzón ve en "Correo").
- * Debe coincidir con FAMILY_MAIL_ACCOUNTS en
+ * Comunión y postcomunión no tienen coordinadores: solo se abren desde
+ * Supercoordinación. Debe coincidir con FAMILY_MAIL_ACCOUNTS en
  * supabase/functions/_shared/family-mail-accounts.ts, que es quien decide de verdad.
  */
-export const FAMILY_EMAIL_SENDERS: Record<Stage | "global", string> = {
+export const FAMILY_EMAIL_SENDERS: Record<FamilyMailbox | "global", string> = {
   preconfirmation: "preconfirmacion@sanpas.es",
   confirmation: "confirmacion@sanpas.es",
+  communion: "comunion@sanpas.es",
+  postcommunion: "postcomunion@sanpas.es",
   global: "grupojoven@sanpas.es",
 };
 
