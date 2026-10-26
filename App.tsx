@@ -53,6 +53,7 @@ import CatechistManager from './components/CatechistManager';
 import CatechistAttendance from './components/CatechistAttendance';
 import FamilyContact from './components/FamilyContact';
 import FamilyInbox, { type MailDraft } from './components/FamilyInbox';
+import StageCoordinatorsManager from './components/StageCoordinatorsManager';
 import ServicesManagement from './components/ServicesManagement';
 import SchoolCalendar from "./components/SchoolCalendar";
 import BirthdayPopup from './components/BirthdayPopup';
@@ -1050,6 +1051,50 @@ const App: React.FC = () => {
   };
 
 
+  // Supercoordinación → Coordinadores. Solo el coordinador general puede
+  // cambiar role y stage (RLS + trg_guard_profile_role_stage). Al quitar a un
+  // coordinador se le deja la etapa para que la siga viendo como catequista.
+  // Los filtros evitan tocar a un coordinador general o a alguien que ya no
+  // coordina esa etapa si la lista estaba desactualizada.
+  const setStageCoordinator = async (userId: string, stage: Stage, assign: boolean): Promise<boolean> => {
+    if (blockIfOffline(assign ? "asignar el coordinador" : "quitar el coordinador")) return false;
+
+    const query = assign
+      ? supabase
+          .from("profiles")
+          .update({ role: "coordinator", stage })
+          .eq("id", userId)
+          .or("role.eq.catechist,stage.not.is.null")
+      : supabase
+          .from("profiles")
+          .update({ role: "catechist" })
+          .eq("id", userId)
+          .eq("role", "coordinator")
+          .eq("stage", stage);
+
+    const { data, error } = await query.select("id, role, stage");
+
+    if (error) {
+      alert("Error cambiando el coordinador: " + error.message);
+      return false;
+    }
+    if (!data?.length) {
+      alert("No se ha podido cambiar: puede que ese perfil ya haya cambiado. Recarga la app y vuelve a intentarlo.");
+      return false;
+    }
+
+    const updated = data[0];
+    const apply = (list: User[]) =>
+      list.map(u =>
+        u.id === updated.id
+          ? { ...u, role: updated.role, stage: (updated.stage as Stage | null) ?? null }
+          : u
+      );
+    setUsers(apply);
+    setIncidentUsers(apply);
+    return true;
+  };
+
   const addUser = async (input: { name: string; email: string; password: string; birthDate?: string; groupIds: string[] }) => {
     if (blockIfOffline("crear el catequista")) return;
     const payload = {
@@ -1856,6 +1901,31 @@ const App: React.FC = () => {
               isOnline={isOnline}
               initialDraft={mailDraft}
               onDraftUsed={() => setMailDraft(null)}
+            />
+          )}
+          {currentView === 'super-inbox-preconfirmation' && isGlobal && (
+            <FamilyInbox
+              key="super-inbox-preconfirmation"
+              currentUser={currentUser}
+              isOnline={isOnline}
+              mailbox="preconfirmation"
+            />
+          )}
+          {currentView === 'super-inbox-confirmation' && isGlobal && (
+            <FamilyInbox
+              key="super-inbox-confirmation"
+              currentUser={currentUser}
+              isOnline={isOnline}
+              mailbox="confirmation"
+            />
+          )}
+          {currentView === 'super-coordinators' && isGlobal && (
+            <StageCoordinatorsManager
+              users={usersWithStages}
+              groups={groups}
+              getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
+              isOnline={isOnline}
+              onSetCoordinator={setStageCoordinator}
             />
           )}
           {currentView === 'coordinator-edit-groups' && (

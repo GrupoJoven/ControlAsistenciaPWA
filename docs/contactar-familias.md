@@ -135,6 +135,12 @@ aplicación** de cada cuenta (los secrets `SMTP_PASS_...` del paso 2): no hay qu
 crear nada nuevo. Cada coordinador ve solo el buzón de su cuenta, igual que en
 la tabla de arriba.
 
+El coordinador general tiene además, en **Supercoordinación**, las páginas
+*Correo de preconfirmación* y *Correo de confirmación*: son la misma página
+Correo, pero con el buzón de esa etapa (`preconfirmacion@` o `confirmacion@`),
+igual que la vería su coordinador. Lo que responda o envíe desde ahí sale de esa
+cuenta. Un coordinador de etapa no puede abrir el buzón de la otra.
+
 - **Leído / no leído**: abrir un correo **no lo marca como leído** en Gmail. Para
   eso está el botón *Marcar como leído* (o *Marcar como no leído*) del propio
   correo, que lo cambia también en Gmail. Es lo único que la app cambia en el
@@ -164,7 +170,8 @@ la tabla de arriba.
   scripts ni formularios) y las imágenes externas no se cargan hasta pulsar
   *Mostrar imágenes*, para que nadie sepa cuándo se ha abierto un correo.
 - **Protección de datos**: cualquier coordinador de una etapa ve **todo** el
-  buzón de esa cuenta, incluidas las respuestas de las familias.
+  buzón de esa cuenta, incluidas las respuestas de las familias. Los
+  coordinadores generales ven los tres buzones.
 
 ### Requisito: IMAP permitido en Google Workspace
 

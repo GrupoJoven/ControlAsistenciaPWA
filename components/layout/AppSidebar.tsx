@@ -3,7 +3,7 @@ import { Church, LogOut, Menu, User as UserIcon, X } from "lucide-react";
 import { NAVIGATION_SECTIONS } from "../../src/app/navigation";
 import { User } from "../../types";
 import { View } from "../../types/app";
-import { getRoleLabel } from "../../src/utils/stages";
+import { getRoleLabel, isGlobalCoordinator } from "../../src/utils/stages";
 
 interface AppSidebarProps {
   currentUser: User;
@@ -67,6 +67,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto pb-6">
           {NAVIGATION_SECTIONS.map((section) => {
             const visibleItems = section.items.filter((item) => {
+              if (item.globalCoordinatorOnly && !isGlobalCoordinator(currentUser)) return false;
               if (!item.roles) return true;
               return item.roles.includes(currentUser.role);
             });
@@ -79,7 +80,9 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                   className={`mt-4 px-4 py-2 text-[10px] font-bold uppercase tracking-widest ${
                     section.accent === "coordinator"
                       ? "text-amber-600"
-                      : "text-slate-400"
+                      : section.accent === "supercoordinator"
+                        ? "text-violet-600"
+                        : "text-slate-400"
                   }`}
                 >
                   {section.label}
@@ -88,18 +91,19 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
                 {visibleItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = currentView === item.view;
-                  const isCoordinatorSection = section.accent === "coordinator";
+                  const activeClass =
+                    section.accent === "coordinator"
+                      ? "bg-amber-50 text-amber-700"
+                      : section.accent === "supercoordinator"
+                        ? "bg-violet-50 text-violet-700"
+                        : "bg-indigo-50 text-indigo-700";
 
                   return (
                     <button
                       key={item.view}
                       onClick={() => onNavigate(item.view)}
                       className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                        isActive
-                          ? isCoordinatorSection
-                            ? "bg-amber-50 text-amber-700"
-                            : "bg-indigo-50 text-indigo-700"
-                          : "text-slate-600 hover:bg-slate-50"
+                        isActive ? activeClass : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
                       <Icon size={20} />

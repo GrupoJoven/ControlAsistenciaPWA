@@ -64,6 +64,11 @@ export type MailDraft = { to: string; subject?: string };
 interface FamilyInboxProps {
   currentUser: User;
   isOnline: boolean;
+  /**
+   * Supercoordinación: el coordinador general abre el buzón de esta etapa en
+   * vez del suyo. La edge function solo se lo permite a él.
+   */
+  mailbox?: Stage;
   /** Si llega, Correo se abre directamente en Redactar con estos datos. */
   initialDraft?: MailDraft | null;
   /** Avisa de que el borrador ya se ha usado, para no volver a abrirlo. */
@@ -192,6 +197,8 @@ const describeError = (e: unknown): string => {
       return `El mensaje no puede superar los ${MAX_BODY_LENGTH} caracteres.`;
     case "forbidden":
       return "Solo los coordinadores pueden ver el correo.";
+    case "mailbox_not_allowed":
+      return "Solo un coordinador general puede abrir el buzón de otra etapa.";
     case "invalid_or_missing_jwt":
       return "Tu sesión ha caducado. Cierra sesión y vuelve a entrar.";
     default:
@@ -312,10 +319,14 @@ const addressFull = (a: Address) => (a.name ? `${a.name} <${a.address}>` : a.add
 
 // ---------------------------------------------------------------------------
 
-const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initialDraft, onDraftUsed }) => {
+const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, mailbox, initialDraft, onDraftUsed }) => {
   const isGlobal = isGlobalCoordinator(currentUser);
   const ownStage: Stage | null = isGlobal ? null : (currentUser.stage ?? null);
-  const accountEmail = FAMILY_EMAIL_SENDERS[ownStage ?? "global"];
+  const accountEmail = FAMILY_EMAIL_SENDERS[mailbox ?? ownStage ?? "global"];
+
+  /** Todas las llamadas llevan el buzón pedido, si no es el propio. */
+  const callInbox = (payload: Record<string, unknown>, files?: File[]) =>
+    invokeInbox(mailbox ? { ...payload, mailbox } : payload, files);
 
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -379,7 +390,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setIsListLoading(true);
     setListError(null);
 
-    invokeInbox({
+    callInbox({
       action: "list",
       folder,
       page,
@@ -403,7 +414,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
       .finally(() => {
         if (requestId === listRequest.current) setIsListLoading(false);
       });
-  }, [folder, page, query, unreadOnly, inboxTab, reloadKey, isOnline]);
+  }, [folder, page, query, unreadOnly, inboxTab, reloadKey, isOnline, mailbox]);
 
   // Mensaje abierto
   const messageRequest = useRef(0);
@@ -415,7 +426,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setMessageError(null);
     setMessage(null);
 
-    invokeInbox({ action: "get", folder, uid: openUid })
+    callInbox({ action: "get", folder, uid: openUid })
       .then((data) => {
         if (requestId === messageRequest.current) setMessage((data as any).message as MessageDetail);
       })
@@ -425,7 +436,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
       .finally(() => {
         if (requestId === messageRequest.current) setIsMessageLoading(false);
       });
-  }, [openUid, folder, isOnline]);
+  }, [openUid, folder, isOnline, mailbox]);
 
   const changeFolder = (next: Folder) => {
     if (next === folder) return;
@@ -482,7 +493,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
 
     setIsMarking(true);
     try {
-      const data = (await invokeInbox({ action: "mark", folder: messageFolder, uid, seen: !message.seen })) as {
+      const data = (await callInbox({ action: "mark", folder: messageFolder, uid, seen: !message.seen })) as {
         seen: boolean;
         unseen: number | null;
         unseen_by_category: Record<Category, number> | null;
@@ -513,7 +524,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     if (!message || downloadingPart) return;
     setDownloadingPart(att.part);
     try {
-      const blob = (await invokeInbox({
+      const blob = (await callInbox({
         action: "attachment",
         folder: message.folder,
         uid: message.uid,
@@ -549,7 +560,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setIsReplying(true);
     setReplyError(null);
     try {
-      const data = await invokeInbox({ action: "reply", uid: message.uid, body: replyBody }, replyFiles);
+      const data = await callInbox({ action: "reply", uid: message.uid, body: replyBody }, replyFiles);
       setReplySentTo((data as any).to ?? message.reply_to?.address ?? "");
       setReplyBody("");
       setReplyFiles([]);
@@ -613,7 +624,7 @@ const FamilyInbox: React.FC<FamilyInboxProps> = ({ currentUser, isOnline, initia
     setIsSending(true);
     setComposeError(null);
     try {
-      const data = (await invokeInbox(
+      const data = (await callInbox(
         {
           action: "send",
           to: recipients.valid,

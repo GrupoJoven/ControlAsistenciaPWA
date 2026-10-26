@@ -2,6 +2,8 @@
 //
 // "Correo": cada coordinador lee y responde el buzón de Gmail de su cuenta, la
 // misma desde la que envía "Contactar familias" (ver _shared/family-mail-accounts.ts).
+// En Supercoordinación, el coordinador general puede pedir además el buzón de
+// una etapa con mailbox: "preconfirmation" | "confirmation" en cualquier acción.
 //
 // - action "list": una página de Recibidos o Enviados, con búsqueda opcional
 //   (admite lo mismo que el buscador de Gmail: palabras, from:, has:attachment...)
@@ -95,7 +97,7 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // 1) Quién llama y qué buzón le toca (misma regla que send-family-email)
+    // 1) Quién llama (misma regla que send-family-email)
     const { data: authData, error: authErr } = await admin.auth.getUser(token);
     const callerId = authData?.user?.id;
     if (authErr || !callerId) return jsonResponse({ ok: false, error: "invalid_or_missing_jwt" }, 401);
@@ -116,10 +118,21 @@ Deno.serve(async (req) => {
     if (profile.stage && !callerStage) {
       return jsonResponse({ ok: false, error: "unknown_stage", stage: profile.stage }, 403);
     }
-    const account = FAMILY_MAIL_ACCOUNTS[callerStage ?? "global"];
 
     // 2) Parámetros
     const { params, files } = await readMailRequest(req);
+
+    // Qué buzón: el suyo o, si es el coordinador general, el de la etapa que pida.
+    // Un coordinador de etapa no puede abrir el de la otra.
+    const mailbox = params?.mailbox ?? null;
+    if (mailbox !== null && mailbox !== "preconfirmation" && mailbox !== "confirmation") {
+      return jsonResponse({ ok: false, error: "invalid_mailbox" }, 400);
+    }
+    if (mailbox && callerStage && mailbox !== callerStage) {
+      return jsonResponse({ ok: false, error: "mailbox_not_allowed" }, 403);
+    }
+    const account = FAMILY_MAIL_ACCOUNTS[(mailbox as Stage | null) ?? callerStage ?? "global"];
+
     const action = params?.action;
     if (!["list", "get", "attachment", "mark", "reply", "send"].includes(action)) {
       return jsonResponse({ ok: false, error: "invalid_action" }, 400);

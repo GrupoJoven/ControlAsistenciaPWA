@@ -15,6 +15,7 @@ import {
   Briefcase,
   HardDrive,
   Inbox,
+  UserCog,
   LucideIcon,
 } from "lucide-react";
 import { View } from "../types/app";
@@ -25,7 +26,7 @@ type Role = "coordinator" | "catechist";
 export type NavigationSection = {
   id: string;
   label: string;
-  accent?: "default" | "coordinator";
+  accent?: "default" | "coordinator" | "supercoordinator";
   items: NavigationItem[];
 };
 
@@ -34,6 +35,8 @@ export type NavigationItem = {
   label: string;
   icon: LucideIcon;
   roles?: Role[];
+  /** Solo para el coordinador general (coordinator sin etapa). */
+  globalCoordinatorOnly?: boolean;
 };
 
 export const NAVIGATION_SECTIONS: NavigationSection[] = [
@@ -73,6 +76,16 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
       { view: "coordinator-edit-groups", label: "Editar Grupos", icon: Settings, roles: ["coordinator"] },
       { view: "class-days", label: "Gestión de calendario", icon: CalendarDays, roles: ["coordinator"] },
       { view: "agenda", label: "Gestión Agenda", icon: Calendar, roles: ["coordinator"] },
+    ],
+  },
+  {
+    id: "supercoordination",
+    label: "Supercoordinación",
+    accent: "supercoordinator",
+    items: [
+      { view: "super-inbox-preconfirmation", label: "Correo de preconfirmación", icon: Inbox, globalCoordinatorOnly: true },
+      { view: "super-inbox-confirmation", label: "Correo de confirmación", icon: Inbox, globalCoordinatorOnly: true },
+      { view: "super-coordinators", label: "Coordinadores", icon: UserCog, globalCoordinatorOnly: true },
     ],
   },
   {

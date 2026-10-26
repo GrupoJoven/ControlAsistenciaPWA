@@ -30,7 +30,8 @@
 --   1. Este fichero.
 --   2. create_group_with_students.sql (se ha modificado para comprobar la
 --      etapa; hay que volver a crearlo).
---   3. Marcar a mano los coordinadores de etapa:
+--   3. Marcar los coordinadores de etapa: desde la app (Supercoordinación →
+--      Coordinadores, solo para el coordinador general) o a mano:
 --        UPDATE public.profiles SET stage = 'confirmation' WHERE id = '...';
 -- ============================================================================
 

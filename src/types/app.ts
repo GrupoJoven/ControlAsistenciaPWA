@@ -16,6 +16,9 @@ export type View =
   | "catechist-attendance"
   | "family-contact"
   | "family-inbox"
+  | "super-inbox-preconfirmation"
+  | "super-inbox-confirmation"
+  | "super-coordinators"
   | "drive"
   | "account"
   | "my-account";
