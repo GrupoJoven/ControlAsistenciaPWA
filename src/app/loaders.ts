@@ -2,7 +2,7 @@ import { supabase } from "../lib/supabaseClient";
 import { getOfflineData, saveOfflineData } from "../utils/offlineStorage";
 import { SchoolName, GroupCatechistLink } from "../types/app";
 import { Group, User, ParishEvent, Student, AttendanceRecord } from "../../types";
-import { EventStage, Stage, getGroupStage } from "../utils/stages";
+import { EventStage, Stage, getGroupStage, toEventGrade } from "../utils/stages";
 
 export const signMediaUrl = async (path?: string | null): Promise<string> => {
   if (!path) return "";
@@ -133,10 +133,11 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
   let eventsMapped: ParishEvent[] = [];
 
   try {
-    // RLS ya devuelve solo los eventos de las etapas del usuario más los de 'all'.
+    // RLS ya devuelve solo los eventos dirigidos al usuario (su etapa y su
+    // curso, más los de 'all' y los de todos los cursos).
     const { data: eventsData, error: eventsErr } = await supabase
       .from("parish_events")
-      .select("id, title, date, stage")
+      .select("id, title, date, stage, grade")
       .order("date", { ascending: true });
 
     if (eventsErr) throw eventsErr;
@@ -146,6 +147,7 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
       title: e.title,
       date: String(e.date),
       stage: ((e.stage as EventStage | null) ?? "all"),
+      grade: toEventGrade(e.grade),
     }));
 
     await saveOfflineData("parishEvents", eventsMapped);
@@ -153,8 +155,12 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
     console.warn("No se pudieron cargar eventos desde Supabase, intentando offline", error);
 
     const cached = await getOfflineData<ParishEvent[]>("parishEvents");
-    // Cachés anteriores a las etapas no traen stage: eran eventos para todos.
-    eventsMapped = (cached?.data ?? []).map((e) => ({ ...e, stage: e.stage ?? "all" }));
+    // Cachés antiguas no traen stage ni grade: eran eventos para todos.
+    eventsMapped = (cached?.data ?? []).map((e) => ({
+      ...e,
+      stage: e.stage ?? "all",
+      grade: toEventGrade(e.grade),
+    }));
   }
 
   return eventsMapped;

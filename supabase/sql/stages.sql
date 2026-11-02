@@ -33,6 +33,9 @@
 --   3. Marcar los coordinadores de etapa: desde la app (Supercoordinación →
 --      Coordinadores, solo para el coordinador general) o a mano:
 --        UPDATE public.profiles SET stage = 'confirmation' WHERE id = '...';
+--   4. event_grades.sql, que añade el curso dentro de la etapa y sustituye
+--      can_see_event_stage(), profile_ids_for_stage() y la política de lectura
+--      de parish_events de este fichero.
 -- ============================================================================
 
 
@@ -337,6 +340,7 @@ AS $$
       );
 $$;
 
+-- OJO: la sustituye can_see_event(_stage, _grade) en event_grades.sql.
 CREATE OR REPLACE FUNCTION public.can_see_event_stage(_stage text)
 RETURNS boolean
 LANGUAGE sql
@@ -362,6 +366,7 @@ $$;
 
 -- Destinatarios de una notificación push por etapa. La usa la edge function
 -- send-push-notifications con la clave de servicio; no se expone al cliente.
+-- OJO: la sustituye profile_ids_for_stage(p_stage, p_grade) en event_grades.sql.
 CREATE OR REPLACE FUNCTION public.profile_ids_for_stage(p_stage text)
 RETURNS TABLE(profile_id uuid)
 LANGUAGE sql
@@ -565,6 +570,7 @@ DROP POLICY IF EXISTS "parish_events_coordinator_full_access" ON public.parish_e
 DROP POLICY IF EXISTS "parish_events_select_visible"          ON public.parish_events;
 DROP POLICY IF EXISTS "parish_events_coordinator_manage"      ON public.parish_events;
 
+-- La sustituye la de event_grades.sql, que además mira el curso.
 CREATE POLICY "parish_events_select_visible"
   ON public.parish_events
   FOR SELECT

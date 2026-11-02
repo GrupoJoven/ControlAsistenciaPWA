@@ -11,7 +11,11 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { User, ParishEvent, AttendanceStatus, getTodayStr } from "../types";
-import { STAGE_LABELS, eventAppliesToStages } from "../src/utils/stages";
+import {
+  eventAppliesToUser,
+  getEventAudienceLabel,
+  isTargetedEvent,
+} from "../src/utils/stages";
 
 interface CatechistAttendanceProps {
   users: User[];
@@ -125,13 +129,14 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   const canShowTable =
     (mode === "class" && activeDate) || (mode === "event" && selectedEventId);
 
-  // En un evento de una sola etapa solo se pasa lista a la gente de esa etapa:
-  // a un catequista de preconfirmación no se le apunta falta en un evento de
-  // confirmación. En días lectivos y eventos de 'all' salen todos.
+  // En un evento dirigido a una etapa o a un curso solo se pasa lista a quien
+  // va dirigido: a un catequista de preconfirmación no se le apunta falta en un
+  // evento de confirmación, ni a uno de 1º en uno de 2º. En días lectivos y
+  // eventos para todos salen todos.
   const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
   const visibleUsers =
     mode === "event" && selectedEvent
-      ? users.filter((u) => eventAppliesToStages(selectedEvent, u.stages ?? []))
+      ? users.filter((u) => eventAppliesToUser(selectedEvent, u))
       : users;
 
   return (
@@ -205,7 +210,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
             <option value="">Selecciona evento...</option>
             {events.map((e) => (
               <option key={e.id} value={e.id}>
-                {e.title} ({e.date}){e.stage !== "all" ? ` · ${STAGE_LABELS[e.stage]}` : ""}
+                {e.title} ({e.date}){isTargetedEvent(e) ? ` · ${getEventAudienceLabel(e)}` : ""}
               </option>
             ))}
           </select>

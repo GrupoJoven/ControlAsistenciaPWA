@@ -22,7 +22,7 @@ import {
   AttendanceStatus,
 } from "../types";
 import { AcademicYear, getAcademicYearCutoff } from "../src/utils/academicYear";
-import { EventStage, STAGE_LABELS, eventAppliesToStages } from "../src/utils/stages";
+import { EventStage, STAGE_LABELS, eventAppliesToUser } from "../src/utils/stages";
 
 interface ReportsProps {
   students: Student[];
@@ -300,8 +300,9 @@ const Reports: React.FC<ReportsProps> = ({
 
           const eventDateValues = pastEvents
             .map((e) => {
-              // Un evento de la otra etapa no le afecta: ni presente ni ausente.
-              if (!eventAppliesToStages(e, c.stages ?? [])) return "-";
+              // Un evento de otra etapa u otro curso no le afecta: ni presente
+              // ni ausente.
+              if (!eventAppliesToUser(e, c)) return "-";
 
               const record = c.attendanceHistory?.find(
                 (h: any) => h.refId === e.id && h.type === "event"

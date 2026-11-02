@@ -10,6 +10,9 @@ type ReportType = "students" | "catechists";
 type Scope = "group" | "all_students" | "all_catechists";
 type Stage = "preconfirmation" | "confirmation";
 type ReportStage = Stage | "all";
+type Grade = 1 | 2;
+/** Etapa y curso concretos, como "preconfirmation:1". */
+type StageGrade = `${Stage}:${Grade}`;
 
 type ReqBody = {
   reportType: ReportType;
@@ -35,6 +38,20 @@ const STAGE_LABELS: Record<ReportStage, string> = {
   all: "Ambas etapas",
 };
 
+const ALL_STAGES: Stage[] = ["preconfirmation", "confirmation"];
+const ALL_GRADES: Grade[] = [1, 2];
+const ALL_STAGE_GRADES: StageGrade[] = ALL_STAGES.flatMap((s) =>
+  ALL_GRADES.map((g): StageGrade => `${s}:${g}`)
+);
+
+/** Curso de un grupo por su nombre ("1º PRECONFIRMACIÓN (A)" -> 1). */
+function getGroupGrade(name: string | null | undefined): Grade | null {
+  const first = (name ?? "").trim().charAt(0);
+  if (first === "1") return 1;
+  if (first === "2") return 2;
+  return null;
+}
+
 /**
  * Etapas efectivas de un perfil: la de profiles.stage más las de sus grupos
  * (misma regla que profile_stages() en la BD). Un coordinador global tiene
@@ -45,7 +62,7 @@ function getProfileStages(
   links: { profile_id: string; group_id: string }[],
   groupStageById: Map<string, string | null>
 ): Stage[] {
-  if (profile.role === "coordinator" && !profile.stage) return ["preconfirmation", "confirmation"];
+  if (profile.role === "coordinator" && !profile.stage) return [...ALL_STAGES];
 
   const stages = new Set<Stage>();
   if (profile.stage === "preconfirmation" || profile.stage === "confirmation") stages.add(profile.stage);
@@ -57,6 +74,70 @@ function getProfileStages(
   }
 
   return [...stages];
+}
+
+/**
+ * Etapas y cursos efectivos de un perfil (misma regla que
+ * profile_stage_grades() en la BD): dentro de cada etapa, los cursos de sus
+ * grupos; y los dos si lleva la etapa entera (coordinador de la etapa o
+ * perfil sin grupos en ella).
+ */
+function getProfileStageGrades(
+  profile: { id: string; role: string; stage: string | null },
+  links: { profile_id: string; group_id: string }[],
+  groupStageById: Map<string, string | null>,
+  groupNameById: Map<string, string>
+): StageGrade[] {
+  if (profile.role === "coordinator" && !profile.stage) return [...ALL_STAGE_GRADES];
+
+  const gradesByStage = new Map<string, Set<Grade>>();
+
+  for (const link of links) {
+    if (link.profile_id !== profile.id) continue;
+
+    const stage = groupStageById.get(link.group_id);
+    const grade = getGroupGrade(groupNameById.get(link.group_id));
+    if (!stage || !grade) continue;
+
+    const grades = gradesByStage.get(stage) ?? new Set<Grade>();
+    grades.add(grade);
+    gradesByStage.set(stage, grades);
+  }
+
+  const stageGrades: StageGrade[] = [];
+
+  for (const stage of getProfileStages(profile, links, groupStageById)) {
+    const own = gradesByStage.get(stage);
+    const coordinatesStage = profile.role === "coordinator" && profile.stage === stage;
+    const grades =
+      own && own.size > 0 && !coordinatesStage ? ALL_GRADES.filter((g) => own.has(g)) : ALL_GRADES;
+
+    for (const grade of grades) stageGrades.push(`${stage}:${grade}`);
+  }
+
+  return stageGrades;
+}
+
+/**
+ * ¿Va este evento dirigido a alguien con estas etapas y cursos? Misma regla
+ * que profile_sees_event() en la BD.
+ */
+function eventAppliesTo(
+  event: { stage: string | null; grade: number | null },
+  stageGrades: StageGrade[]
+): boolean {
+  const stage = event.stage ?? "all";
+  const grade = Number(event.grade);
+
+  // Un evento para todos los cursos solo mira la etapa, como antes de que
+  // hubiera cursos.
+  if (grade !== 1 && grade !== 2) {
+    return stage === "all" || stageGrades.some((sg) => sg.startsWith(`${stage}:`));
+  }
+
+  const stages = stage === "all" ? ALL_STAGES : [stage as Stage];
+
+  return stages.some((s) => stageGrades.includes(`${s}:${grade as Grade}`));
 }
 
 // --------------------
@@ -496,7 +577,9 @@ serve(async (req) => {
 
     if (catsErr) return serverError("Error cargando catequistas.", { detail: catsErr.message });
 
-    const { data: groupRows, error: groupsErr } = await admin.from("groups").select("id, stage");
+    const { data: groupRows, error: groupsErr } = await admin
+      .from("groups")
+      .select("id, name, stage");
     if (groupsErr) return serverError("Error cargando grupos.", { detail: groupsErr.message });
 
     const { data: linkRows, error: linksErr } = await admin
@@ -507,11 +590,19 @@ serve(async (req) => {
     const groupStageById = new Map<string, string | null>(
       (groupRows ?? []).map((g: any) => [String(g.id), g.stage ?? null])
     );
+    const groupNameById = new Map<string, string>(
+      (groupRows ?? []).map((g: any) => [String(g.id), String(g.name ?? "")])
+    );
     const links = (linkRows ?? []) as { profile_id: string; group_id: string }[];
 
     const stagesById = new Map<string, Stage[]>();
+    const stageGradesById = new Map<string, StageGrade[]>();
     for (const c of allCats ?? []) {
       stagesById.set(String(c.id), getProfileStages(c as any, links, groupStageById));
+      stageGradesById.set(
+        String(c.id),
+        getProfileStageGrades(c as any, links, groupStageById, groupNameById)
+      );
     }
 
     const cats = (allCats ?? []).filter(
@@ -520,7 +611,7 @@ serve(async (req) => {
 
     // class days y events del curso. De los eventos, un coordinador de etapa
     // solo ve los suyos y los de 'all'; y a cada catequista solo se le exigen
-    // los de sus etapas.
+    // los dirigidos a sus etapas y cursos.
     const { data: classDays, error: cdErr } = await admin
       .from("class_days")
       .select("date")
@@ -531,7 +622,7 @@ serve(async (req) => {
 
     let evQuery = admin
       .from("parish_events")
-      .select("id, title, date, stage")
+      .select("id, title, date, stage, grade")
       .gte("date", start)
       .lte("date", todayISO);
 
@@ -544,8 +635,8 @@ serve(async (req) => {
     const nClass = (classDays ?? []).length;
     const nEvents = (evs ?? []).length;
 
-    const eventsForStages = (stages: Stage[]) =>
-      (evs ?? []).filter((e: any) => e.stage === "all" || stages.includes(e.stage));
+    const eventsForStageGrades = (stageGrades: StageGrade[]) =>
+      (evs ?? []).filter((e: any) => eventAppliesTo(e, stageGrades));
 
     // attendance catequistas: días lectivos (catechist_attendance) y eventos
     // (catechist_attendance_events) van en tablas distintas.
@@ -572,7 +663,7 @@ serve(async (req) => {
     // Agregación simple: contamos asistencias "present"/"late" como asistencia.
     const byP = new Map<string, { classAttend: number; classPossible: number; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
     for (const pid of catechistIds) {
-      const applicable = eventsForStages(stagesById.get(String(pid)) ?? []);
+      const applicable = eventsForStageGrades(stageGradesById.get(String(pid)) ?? []);
       byP.set(pid, {
         classAttend: 0,
         classPossible: nClass * 2,
@@ -599,7 +690,7 @@ serve(async (req) => {
       const pid = String((r as any).profile_id);
       const obj = byP.get(pid);
       if (!obj) continue;
-      // Un evento de la otra etapa no cuenta ni a favor ni en contra.
+      // Un evento de otra etapa u otro curso no cuenta ni a favor ni en contra.
       if (!obj.eventIds.has(String((r as any).event_id))) continue;
 
       const st = (r as any).status;
@@ -628,7 +719,7 @@ serve(async (req) => {
         `ÁMBITO: Equipo de catequistas${callerStage ? ` de ${STAGE_LABELS[callerStage]}` : ""}`,
         `PERIODO: ${start} a ${todayISO}`,
         `DÍAS LECTIVOS: ${nClass} (cada uno cuenta catequesis+misa)`,
-        `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los de su etapa)`,
+        `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los de su etapa y curso)`,
         ``,
         `PARTICIPACIÓN MÁS BAJA:`,
         ...low.map((r) => `- ${r.name}: ${r.rate}% (asistencias=${r.attended}/${r.possible})`),

@@ -2,16 +2,21 @@ import React, { useState } from "react";
 import { Calendar, Lock, Plus } from "lucide-react";
 import { ParishEvent, User } from "../types";
 import {
+  ALL_GRADES,
+  EventGrade,
   EventStage,
+  GRADE_LABELS,
   STAGE_LABELS,
   canManageEventStage,
+  getEventAudienceLabel,
   isGlobalCoordinator,
+  isTargetedEvent,
 } from "../src/utils/stages";
 
 interface AgendaManagerProps {
   currentUser: User;
   events: ParishEvent[];
-  onAdd: (e: { title: string; date: string; stage: EventStage }) => void;
+  onAdd: (e: { title: string; date: string; stage: EventStage; grade: EventGrade }) => void;
   onRemove: (id: string) => void;
 }
 
@@ -25,7 +30,14 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
   const [newTitle, setNewTitle] = useState("");
   const [newDateTime, setNewDateTime] = useState("");
   const [newStage, setNewStage] = useState<EventStage>(fixedStage ?? "all");
+  const [newGrade, setNewGrade] = useState<EventGrade>(0);
   const [eventToDelete, setEventToDelete] = useState<ParishEvent | null>(null);
+
+  const stage = fixedStage ?? newStage;
+
+  // Un evento de un solo curso lo es de un curso de UNA etapa: no hay eventos
+  // para los primeros de las dos a la vez, serían dos eventos distintos.
+  const grade: EventGrade = stage === "all" ? 0 : newGrade;
 
   const handleAdd = () => {
     if (!newTitle || !newDateTime) return;
@@ -33,7 +45,8 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
     onAdd({
       title: newTitle,
       date: newDateTime,
-      stage: fixedStage ?? newStage,
+      stage,
+      grade,
     });
 
     setNewTitle("");
@@ -91,8 +104,9 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
 
-          {/* Dos filas: con el selector de etapa, título + fecha + etapa + botón
-              no caben en una sola dentro de max-w-2xl y el botón se salía. */}
+          {/* Varias filas: con los selectores de etapa y curso, título + fecha +
+              etapa + curso + botón no caben en una sola dentro de max-w-2xl y
+              el botón se salía. */}
           <div className="flex flex-col gap-4">
             <input
               type="text"
@@ -112,7 +126,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
 
               {fixedStage ? (
                 <div
-                  className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-600 flex items-center gap-2 w-full sm:w-auto sm:flex-1"
+                  className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-600 flex items-center gap-2 w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
                   title="Solo puedes crear eventos de tu etapa"
                 >
                   <Lock size={14} className="text-slate-400 shrink-0" />
@@ -120,16 +134,37 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
                 </div>
               ) : (
                 <select
-                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1"
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
                   value={newStage}
                   onChange={(e) => setNewStage(e.target.value as EventStage)}
-                  title="¿A quién afecta el evento?"
+                  title="¿A qué etapa afecta el evento?"
                 >
                   <option value="all">{STAGE_LABELS.all}</option>
                   <option value="preconfirmation">{STAGE_LABELS.preconfirmation}</option>
                   <option value="confirmation">{STAGE_LABELS.confirmation}</option>
                 </select>
               )}
+
+              {/* Un evento de "ambas etapas" es para todo el mundo: elegir un
+                  curso dentro de las dos no tendría sentido. */}
+              <select
+                className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px] disabled:bg-slate-100 disabled:text-slate-400"
+                value={grade}
+                disabled={stage === "all"}
+                onChange={(e) => setNewGrade(Number(e.target.value) as EventGrade)}
+                title={
+                  stage === "all"
+                    ? "Un evento de ambas etapas es para todos los cursos"
+                    : "¿A qué curso de la etapa afecta el evento?"
+                }
+              >
+                <option value={0}>{GRADE_LABELS[0]}</option>
+                {ALL_GRADES.map((g) => (
+                  <option key={g} value={g}>
+                    Solo {GRADE_LABELS[g]} curso
+                  </option>
+                ))}
+              </select>
 
               <button
                 onClick={handleAdd}
@@ -169,12 +204,12 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
                       })}
                       <span
                         className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                          event.stage === "all"
-                            ? "bg-slate-100 text-slate-500"
-                            : "bg-indigo-50 text-indigo-600"
+                          isTargetedEvent(event)
+                            ? "bg-indigo-50 text-indigo-600"
+                            : "bg-slate-100 text-slate-500"
                         }`}
                       >
-                        {STAGE_LABELS[event.stage]}
+                        {getEventAudienceLabel(event)}
                       </span>
                     </p>
                   </div>

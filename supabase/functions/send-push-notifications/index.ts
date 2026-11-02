@@ -19,6 +19,11 @@ type RequestBody = {
    * 'all', vacío o ausente = todo el mundo. Se combina con userIds (AND).
    */
   stage?: "preconfirmation" | "confirmation" | "all" | null;
+  /**
+   * Afina el envío a un curso de esa etapa (1 o 2). 0, vacío o ausente = los
+   * dos cursos. Solo se tiene en cuenta si hay etapa.
+   */
+  grade?: number | null;
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -72,13 +77,15 @@ Deno.serve(async (req) => {
       ? [...new Set(body.userIds.filter((v) => typeof v === "string" && v.trim().length > 0))]
       : [];
 
-    // Filtro por etapa: la BD resuelve quién pertenece a ella (grupos,
+    // Filtro por etapa y curso: la BD resuelve a quién le toca (grupos,
     // profiles.stage y coordinadores globales) para no duplicar la regla aquí.
     const stage = body.stage === "preconfirmation" || body.stage === "confirmation" ? body.stage : null;
+    const grade = Number(body.grade) === 1 || Number(body.grade) === 2 ? Number(body.grade) : 0;
 
     if (stage) {
       const { data: stageIds, error: stageErr } = await supabase.rpc("profile_ids_for_stage", {
         p_stage: stage,
+        p_grade: grade,
       });
 
       if (stageErr) {
@@ -94,10 +101,10 @@ Deno.serve(async (req) => {
           ? targetUserIds.filter((id) => allowed.has(id))
           : [...allowed];
 
-      // Nadie en esa etapa: no hay que mandar nada (y sin filtro se enviaría a todos).
+      // Nadie a quien avisar: no hay que mandar nada (y sin filtro se enviaría a todos).
       if (targetUserIds.length === 0) {
         return new Response(
-          JSON.stringify({ ok: true, sent: 0, removed: 0, total: 0, stage }),
+          JSON.stringify({ ok: true, sent: 0, removed: 0, total: 0, stage, grade }),
           { status: 200, headers: corsHeaders }
         );
       }
