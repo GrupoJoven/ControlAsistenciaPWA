@@ -43,10 +43,12 @@ import {
   EventGrade,
   EventStage,
   Stage,
-  getEventsForStageGrades,
+  getEventsForUser,
   getUserStageGrades,
   getUserStages,
+  getVisibleEvents,
   isGlobalCoordinator,
+  toCountsForAttendance,
   toEventGrade,
 } from './src/utils/stages';
 import Dashboard from './components/Dashboard';
@@ -648,18 +650,33 @@ const App: React.FC = () => {
     [classDays, selectedAcademicYear]
   );
 
-  // Eventos dirigidos al usuario: los de su etapa y su curso, más los de
-  // 'all' y los de todos los cursos. RLS ya los filtra en el servidor, pero se
-  // vuelve a filtrar aquí para que la caché offline y los eventos recién
-  // creados sigan exactamente la misma regla.
+  // Eventos dirigidos al usuario: los de su etapa y su curso, los de 'all' y
+  // los específicos a los que está invitado. RLS ya los filtra en el servidor,
+  // pero se vuelve a filtrar aquí para que la caché offline y los eventos
+  // recién creados sigan exactamente la misma regla.
   const myStageGrades = useMemo(
     () => (currentUser ? getUserStageGrades(currentUser, groups, groupCatechistLinks) : []),
     [currentUser, groups, groupCatechistLinks]
   );
 
+  const meWithStageGrades = useMemo<User | null>(
+    () => (currentUser ? { ...currentUser, stageGrades: myStageGrades } : null),
+    [currentUser, myStageGrades]
+  );
+
+  // Su agenda: solo lo que va dirigido a él. Un evento específico no sale aquí
+  // aunque lo haya creado él, aunque sí en la pantalla de gestión.
+  const myEvents = useMemo(
+    () => (meWithStageGrades ? getEventsForUser(events, meWithStageGrades) : []),
+    [events, meWithStageGrades]
+  );
+
+  // Lo que puede ver: su agenda más los eventos que gestiona como coordinador.
+  // Para pasar lista o borrar un evento específico hay que verlo, aunque quien
+  // lo gestiona no esté invitado.
   const visibleEvents = useMemo(
-    () => getEventsForStageGrades(events, myStageGrades),
-    [events, myStageGrades]
+    () => (meWithStageGrades ? getVisibleEvents(events, meWithStageGrades) : []),
+    [events, meWithStageGrades]
   );
 
   // parish_events.date es un timestamp ("2026-09-11T18:00:00"), así que hay que
@@ -676,8 +693,8 @@ const App: React.FC = () => {
 
   // Los "Próximos Eventos" del Resumen son todos los eventos futuros dirigidos
   // al usuario, pertenezcan al curso académico que pertenezcan. Por eso reciben
-  // `visibleEvents` y NO se filtran por `selectedAcademicYear`: el Dashboard ya
-  // se queda solo con los que aún no han pasado.
+  // `myEvents` y NO se filtran por `selectedAcademicYear`: el Dashboard ya se
+  // queda solo con los que aún no han pasado.
   const persistStudentAttendance = async (
     date: string,
     studentId: string,
@@ -1326,17 +1343,50 @@ const App: React.FC = () => {
     date: string;
     stage: EventStage;
     grade: EventGrade;
+    inviteOnly: boolean;
+    countsForAttendance: boolean;
+    inviteeIds: string[];
   }) => {
   if (blockIfOffline("añadir evento a la agenda")) return;
+
+    const inviteeIds = event.inviteOnly ? [...new Set(event.inviteeIds)] : [];
+
+    // Un evento específico sin invitados no le saldría a nadie en la agenda.
+    if (event.inviteOnly && inviteeIds.length === 0) {
+      alert("Un evento específico necesita al menos un invitado.");
+      return;
+    }
+
     const { data, error } = await supabase
       .from("parish_events")
-      .insert({ title: event.title, date: event.date, stage: event.stage, grade: event.grade })
-      .select("id, title, date, stage, grade")
+      .insert({
+        title: event.title,
+        date: event.date,
+        stage: event.stage,
+        grade: event.grade,
+        invite_only: event.inviteOnly,
+        counts_for_attendance: event.countsForAttendance,
+      })
+      .select("id, title, date, stage, grade, invite_only, counts_for_attendance")
       .single();
 
     if (error) {
       alert("Error al añadir evento: " + error.message);
       return;
+    }
+
+    if (inviteeIds.length > 0) {
+      const { error: inviteesError } = await supabase
+        .from("parish_event_invitees")
+        .insert(inviteeIds.map((profileId) => ({ event_id: data.id, profile_id: profileId })));
+
+      // Un evento específico sin su lista de invitados queda invisible para
+      // todos, así que se deshace en vez de dejarlo a medias.
+      if (inviteesError) {
+        await supabase.from("parish_events").delete().eq("id", data.id);
+        alert("Error al guardar los invitados: " + inviteesError.message);
+        return;
+      }
     }
 
     const createdEvent: ParishEvent = {
@@ -1345,6 +1395,11 @@ const App: React.FC = () => {
       date: String(data.date),
       stage: (data.stage as EventStage) ?? event.stage,
       grade: toEventGrade(data.grade ?? event.grade),
+      inviteOnly: (data.invite_only ?? event.inviteOnly) === true,
+      countsForAttendance: toCountsForAttendance(
+        data.counts_for_attendance ?? event.countsForAttendance
+      ),
+      inviteeIds,
     };
 
     setEvents(prev =>
@@ -1362,16 +1417,18 @@ const App: React.FC = () => {
         minute: "2-digit",
       });
 
-      // Solo se avisa a quien va dirigido el evento (etapa y curso) y a los
-      // coordinadores globales. La edge function resuelve los destinatarios en
-      // el servidor.
+      // Solo se avisa a quien va dirigido el evento. En uno de etapa la edge
+      // function resuelve los destinatarios en el servidor (etapa, curso y
+      // coordinadores globales); en uno específico son los invitados y nadie
+      // más, ni siquiera quien lo ha creado.
       const res = await supabase.functions.invoke("send-push-notifications", {
         body: {
           title: "Nuevo evento en la agenda",
           body: `${createdEvent.title} · ${formattedDateTime}`,
           url: "/",
-          stage: createdEvent.stage,
-          grade: createdEvent.grade,
+          ...(createdEvent.inviteOnly
+            ? { userIds: inviteeIds }
+            : { stage: createdEvent.stage, grade: createdEvent.grade }),
         },
       });
 
@@ -1415,7 +1472,7 @@ const App: React.FC = () => {
 
     const { data: removedEvent, error: fetchError } = await supabase
       .from("parish_events")
-      .select("title, date, stage, grade")
+      .select("*")
       .eq("id", id)
       .single();
 
@@ -1427,6 +1484,23 @@ const App: React.FC = () => {
     if (!removedEvent) {
       alert("No se ha encontrado el evento.");
       return;
+    }
+
+    // Los invitados hay que leerlos ANTES de borrar: la tabla va en cascada y
+    // después ya no habría a quién avisar.
+    let inviteeIds: string[] = [];
+
+    if (removedEvent.invite_only === true) {
+      const { data: inviteeRows, error: inviteesError } = await supabase
+        .from("parish_event_invitees")
+        .select("profile_id")
+        .eq("event_id", id);
+
+      if (inviteesError) {
+        console.error("Error leyendo los invitados del evento:", inviteesError);
+      }
+
+      inviteeIds = (inviteeRows ?? []).map((row: any) => String(row.profile_id));
     }
 
     const { error: deleteError } = await supabase
@@ -1458,8 +1532,12 @@ const App: React.FC = () => {
           title: "Evento eliminado de la agenda",
           body: `${removedEvent.title} · ${formattedDateTime}`,
           url: "/",
-          stage: (removedEvent.stage as EventStage | null) ?? "all",
-          grade: toEventGrade(removedEvent.grade),
+          ...(removedEvent.invite_only === true
+            ? { userIds: inviteeIds }
+            : {
+                stage: (removedEvent.stage as EventStage | null) ?? "all",
+                grade: toEventGrade(removedEvent.grade),
+              }),
         },
       });
 
@@ -1794,7 +1872,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'dashboard' && <Dashboard students={students} events={visibleEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
+          {currentView === 'dashboard' && <Dashboard students={students} events={myEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
           {currentView === 'attendance' && (
             <AttendanceTracker
               students={myCatecumenos}
@@ -2014,6 +2092,7 @@ const App: React.FC = () => {
             <AgendaManager
               currentUser={currentUser}
               events={visibleEvents}
+              users={usersWithStages}
               onAdd={(e) => void addEvent(e)}
               onRemove={(id) => void removeEvent(id)}
             />

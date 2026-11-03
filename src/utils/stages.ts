@@ -6,8 +6,9 @@ import type { GroupCatechistLink } from "../types/app";
  * "2º CONFIRMACIÓN (B)", etc., y la etapa sale del nombre.
  *
  * Estas reglas deben coincidir con las de stages.sql (group_stage() y
- * profile_stages()) y event_grades.sql (group_grade() y
- * profile_stage_grades()). Si cambias una, cambia la otra.
+ * profile_stages()), event_grades.sql (group_grade() y
+ * profile_stage_grades()) y event_invitees.sql (profile_sees_event_row()).
+ * Si cambias una, cambia la otra.
  */
 export type Stage = "preconfirmation" | "confirmation";
 
@@ -70,6 +71,22 @@ export const toEventGrade = (value: unknown): EventGrade => {
   const n = Number(value);
   return n === 1 || n === 2 ? (n as Grade) : 0;
 };
+
+/**
+ * parish_events.counts_for_attendance. Solo un false explícito deja un evento
+ * fuera del porcentaje: una caché antigua sin la columna vale por "sí cuenta",
+ * que es el valor por defecto en la BD.
+ */
+export const toCountsForAttendance = (value: unknown): boolean => value !== false;
+
+/**
+ * Lo que hace falta de un evento para saber a quién va dirigido: su etapa y
+ * curso, o su lista de invitados si es un evento específico.
+ */
+export type EventAudience = Pick<
+  ParishEvent,
+  "stage" | "grade" | "inviteOnly" | "inviteeIds"
+>;
 
 /** Coordinator sin etapa: lo ve todo. */
 export const isGlobalCoordinator = (user: User | null | undefined): boolean =>
@@ -178,24 +195,57 @@ export const eventAppliesToStageGrades = (
   return stages.some((stage) => stageGrades.includes(`${stage}:${grade}`));
 };
 
-/** ¿Va este evento dirigido a este usuario? */
-export const eventAppliesToUser = (
-  event: Pick<ParishEvent, "stage" | "grade">,
-  user: User
-): boolean => eventAppliesToStageGrades(event, user.stageGrades ?? []);
-
-export const getEventsForStageGrades = (
-  events: ParishEvent[],
+/**
+ * ¿Va este evento dirigido a este perfil? Misma regla que
+ * profile_sees_event_row() en SQL: en un evento específico manda la lista de
+ * invitados y la etapa y el curso solo dicen quién lo gestiona.
+ *
+ * inviteeIds es lo que RLS nos haya dejado leer: un catequista solo conoce su
+ * propia invitación, así que de los demás saldrá "no invitado". Se equivoca
+ * siempre hacia el lado seguro (no contar el evento), nunca hacia la falta.
+ */
+export const eventAppliesTo = (
+  event: EventAudience,
+  profileId: string,
   stageGrades: StageGrade[]
-): ParishEvent[] => events.filter((event) => eventAppliesToStageGrades(event, stageGrades));
+): boolean =>
+  event.inviteOnly
+    ? (event.inviteeIds ?? []).includes(profileId)
+    : eventAppliesToStageGrades(event, stageGrades);
+
+/** ¿Va este evento dirigido a este usuario? */
+export const eventAppliesToUser = (event: EventAudience, user: User): boolean =>
+  eventAppliesTo(event, user.id, user.stageGrades ?? []);
 
 /**
- * Eventos que cuentan para un usuario concreto (su tasa de asistencia, su
- * histórico...). Si no se le han calculado etapas no le afecta ninguno de
- * etapa o curso concretos.
+ * Eventos dirigidos a un usuario concreto (su agenda, su histórico...). Si no
+ * se le han calculado etapas no le afecta ninguno de etapa o curso concretos.
  */
 export const getEventsForUser = (events: ParishEvent[], user: User): ParishEvent[] =>
-  getEventsForStageGrades(events, user.stageGrades ?? []);
+  events.filter((event) => eventAppliesToUser(event, user));
+
+/**
+ * ¿Cuenta este evento para el porcentaje de asistencia del usuario? Además de
+ * irle dirigido, el evento tiene que contar para la asistencia: un evento
+ * específico puede crearse como informativo y entonces no suma ni resta.
+ */
+export const eventCountsForUser = (event: ParishEvent, user: User): boolean =>
+  event.countsForAttendance !== false && eventAppliesToUser(event, user);
+
+export const getEventsCountingForUser = (events: ParishEvent[], user: User): ParishEvent[] =>
+  events.filter((event) => eventCountsForUser(event, user));
+
+/**
+ * ¿Puede el usuario VER el evento? Los dirigidos a él, más los que gestiona
+ * como coordinador: el que crea un evento específico tiene que poder borrarlo
+ * y pasar lista aunque él no esté invitado. Misma regla que las dos políticas
+ * de parish_events (select_visible y coordinator_manage, que es FOR ALL).
+ */
+export const isEventVisibleTo = (event: ParishEvent, user: User): boolean =>
+  eventAppliesToUser(event, user) || canManageEventStage(user, event.stage);
+
+export const getVisibleEvents = (events: ParishEvent[], user: User): ParishEvent[] =>
+  events.filter((event) => isEventVisibleTo(event, user));
 
 /**
  * Qué eventos puede crear/borrar el usuario (misma regla que
@@ -208,16 +258,22 @@ export const canManageEventStage = (user: User | null | undefined, stage: EventS
   return stage !== "all" && stage === user!.stage;
 };
 
-/** A quién va dirigido un evento: "Confirmación", "1º Preconfirmación"... */
-export const getEventAudienceLabel = (event: Pick<ParishEvent, "stage" | "grade">): string => {
+/**
+ * A quién va dirigido un evento: "Confirmación", "1º Preconfirmación"...
+ * En uno específico no se dice cuántos invitados hay porque cada usuario solo
+ * conoce su propia invitación; el número se muestra donde sí se sabe (la
+ * pantalla de agenda del coordinador).
+ */
+export const getEventAudienceLabel = (event: EventAudience): string => {
+  if (event.inviteOnly) return "Solo invitados";
   if (!event.grade) return STAGE_LABELS[event.stage];
   if (event.stage === "all") return `${GRADE_LABELS[event.grade]} · ambas etapas`;
   return `${GRADE_LABELS[event.grade]} ${STAGE_LABELS[event.stage]}`;
 };
 
 /** ¿Hay que etiquetar el evento? Los de todas las etapas y cursos no. */
-export const isTargetedEvent = (event: Pick<ParishEvent, "stage" | "grade">): boolean =>
-  event.stage !== "all" || !!event.grade;
+export const isTargetedEvent = (event: EventAudience): boolean =>
+  event.inviteOnly || event.stage !== "all" || !!event.grade;
 
 /** Texto para la interfaz: "Coordinador · Confirmación", "Catequista", etc. */
 export const getRoleLabel = (user: User): string => {

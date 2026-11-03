@@ -2,7 +2,13 @@ import { supabase } from "../lib/supabaseClient";
 import { getOfflineData, saveOfflineData } from "../utils/offlineStorage";
 import { SchoolName, GroupCatechistLink } from "../types/app";
 import { Group, User, ParishEvent, Student, AttendanceRecord } from "../../types";
-import { EventStage, Stage, getGroupStage, toEventGrade } from "../utils/stages";
+import {
+  EventStage,
+  Stage,
+  getGroupStage,
+  toCountsForAttendance,
+  toEventGrade,
+} from "../utils/stages";
 
 export const signMediaUrl = async (path?: string | null): Promise<string> => {
   if (!path) return "";
@@ -129,37 +135,77 @@ export const loadProfiles = async (): Promise<User[]> => {
 };
 
 
+const EVENT_COLUMNS = "id, title, date, stage, grade, invite_only, counts_for_attendance";
+
+/** Columnas de antes de event_invitees.sql, para el reintento de loadEvents. */
+const LEGACY_EVENT_COLUMNS = "id, title, date, stage, grade";
+
+const mapEventRow = (e: any): ParishEvent => ({
+  id: e.id,
+  title: e.title,
+  date: String(e.date),
+  stage: ((e.stage as EventStage | null) ?? "all"),
+  grade: toEventGrade(e.grade),
+  inviteOnly: e.invite_only === true,
+  countsForAttendance: toCountsForAttendance(e.counts_for_attendance),
+  // De un evento específico, RLS devuelve las invitaciones que el usuario
+  // puede leer: la suya, o todas si gestiona el evento.
+  inviteeIds: Array.isArray(e.parish_event_invitees)
+    ? e.parish_event_invitees.map((row: any) => String(row.profile_id))
+    : [],
+});
+
 export const loadEvents = async (): Promise<ParishEvent[]> => {
   let eventsMapped: ParishEvent[] = [];
 
   try {
     // RLS ya devuelve solo los eventos dirigidos al usuario (su etapa y su
-    // curso, más los de 'all' y los de todos los cursos).
-    const { data: eventsData, error: eventsErr } = await supabase
+    // curso, los de 'all', los específicos a los que está invitado y los que
+    // gestiona como coordinador).
+    const withInvitees = await supabase
       .from("parish_events")
-      .select("id, title, date, stage, grade")
+      .select(`${EVENT_COLUMNS}, parish_event_invitees(profile_id)`)
       .order("date", { ascending: true });
 
-    if (eventsErr) throw eventsErr;
+    let rows: any[];
 
-    eventsMapped = (eventsData ?? []).map((e) => ({
-      id: e.id,
-      title: e.title,
-      date: String(e.date),
-      stage: ((e.stage as EventStage | null) ?? "all"),
-      grade: toEventGrade(e.grade),
-    }));
+    if (withInvitees.error) {
+      // Mientras no se haya ejecutado event_invitees.sql no existen ni las
+      // columnas nuevas ni la tabla de invitados. Se reintenta con lo de
+      // siempre para no dejar la agenda vacía entre los dos despliegues.
+      console.warn(
+        "parish_events sin columnas de invitados, reintentando sin ellas",
+        withInvitees.error
+      );
+
+      const legacy = await supabase
+        .from("parish_events")
+        .select(LEGACY_EVENT_COLUMNS)
+        .order("date", { ascending: true });
+
+      if (legacy.error) throw legacy.error;
+
+      rows = legacy.data ?? [];
+    } else {
+      rows = withInvitees.data ?? [];
+    }
+
+    eventsMapped = rows.map(mapEventRow);
 
     await saveOfflineData("parishEvents", eventsMapped);
   } catch (error) {
     console.warn("No se pudieron cargar eventos desde Supabase, intentando offline", error);
 
     const cached = await getOfflineData<ParishEvent[]>("parishEvents");
-    // Cachés antiguas no traen stage ni grade: eran eventos para todos.
+    // Cachés antiguas no traen stage, grade ni invitados: eran eventos de
+    // etapa para todos los cursos y todos contaban para la asistencia.
     eventsMapped = (cached?.data ?? []).map((e) => ({
       ...e,
       stage: e.stage ?? "all",
       grade: toEventGrade(e.grade),
+      inviteOnly: e.inviteOnly === true,
+      countsForAttendance: toCountsForAttendance(e.countsForAttendance),
+      inviteeIds: e.inviteeIds ?? [],
     }));
   }
 

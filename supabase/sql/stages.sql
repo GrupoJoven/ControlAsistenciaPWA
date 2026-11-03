@@ -36,6 +36,8 @@
 --   4. event_grades.sql, que añade el curso dentro de la etapa y sustituye
 --      can_see_event_stage(), profile_ids_for_stage() y la política de lectura
 --      de parish_events de este fichero.
+--   5. event_invitees.sql, que añade los eventos específicos (por lista de
+--      invitados) y vuelve a sustituir esa política de lectura.
 -- ============================================================================
 
 

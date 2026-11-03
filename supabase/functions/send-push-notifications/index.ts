@@ -13,6 +13,11 @@ type RequestBody = {
   title: string;
   body: string;
   url?: string;
+  /**
+   * Destinatarios concretos. Si llega la lista, aunque sea vacía, el envío se
+   * limita a ella: un evento específico sin invitados no debe acabar avisando
+   * a todo el mundo.
+   */
   userIds?: string[];
   /**
    * Limita el envío a la gente de una etapa (más los coordinadores globales).
@@ -73,8 +78,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    let targetUserIds = Array.isArray(body.userIds)
-      ? [...new Set(body.userIds.filter((v) => typeof v === "string" && v.trim().length > 0))]
+    const hasUserIdFilter = Array.isArray(body.userIds);
+
+    let targetUserIds = hasUserIdFilter
+      ? [...new Set(body.userIds!.filter((v) => typeof v === "string" && v.trim().length > 0))]
       : [];
 
     // Filtro por etapa y curso: la BD resuelve a quién le toca (grupos,
@@ -108,6 +115,22 @@ Deno.serve(async (req) => {
           { status: 200, headers: corsHeaders }
         );
       }
+    }
+
+    // Lista de destinatarios pedida pero vacía: no hay a quién avisar. Sin
+    // esta salida el envío se quedaría sin filtro y le llegaría a todos.
+    if (hasUserIdFilter && targetUserIds.length === 0) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sent: 0,
+          removed: 0,
+          total: 0,
+          filtered_by_user_ids: true,
+          requested_user_ids: [],
+        }),
+        { status: 200, headers: corsHeaders }
+      );
     }
 
     let subsQuery = supabase

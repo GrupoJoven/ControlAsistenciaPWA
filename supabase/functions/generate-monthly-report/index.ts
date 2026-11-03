@@ -122,7 +122,7 @@ function getProfileStageGrades(
  * ¿Va este evento dirigido a alguien con estas etapas y cursos? Misma regla
  * que profile_sees_event() en la BD.
  */
-function eventAppliesTo(
+function eventAppliesToStageGrades(
   event: { stage: string | null; grade: number | null },
   stageGrades: StageGrade[]
 ): boolean {
@@ -138,6 +138,24 @@ function eventAppliesTo(
   const stages = stage === "all" ? ALL_STAGES : [stage as Stage];
 
   return stages.some((s) => stageGrades.includes(`${s}:${grade as Grade}`));
+}
+
+/**
+ * ¿Va este evento dirigido a este perfil? Misma regla que
+ * profile_sees_event_row() en la BD: en un evento específico manda la lista de
+ * invitados y la etapa y el curso solo dicen quién lo gestiona.
+ */
+function eventAppliesTo(
+  event: { id: string; stage: string | null; grade: number | null; invite_only?: boolean | null },
+  profileId: string,
+  stageGrades: StageGrade[],
+  inviteesByEvent: Map<string, Set<string>>
+): boolean {
+  if (event.invite_only === true) {
+    return inviteesByEvent.get(String(event.id))?.has(profileId) ?? false;
+  }
+
+  return eventAppliesToStageGrades(event, stageGrades);
 }
 
 // --------------------
@@ -611,7 +629,7 @@ serve(async (req) => {
 
     // class days y events del curso. De los eventos, un coordinador de etapa
     // solo ve los suyos y los de 'all'; y a cada catequista solo se le exigen
-    // los dirigidos a sus etapas y cursos.
+    // los dirigidos a él: sus etapas y cursos, o su invitación.
     const { data: classDays, error: cdErr } = await admin
       .from("class_days")
       .select("date")
@@ -622,7 +640,7 @@ serve(async (req) => {
 
     let evQuery = admin
       .from("parish_events")
-      .select("id, title, date, stage, grade")
+      .select("id, title, date, stage, grade, invite_only, counts_for_attendance")
       .gte("date", start)
       .lte("date", todayISO);
 
@@ -632,11 +650,39 @@ serve(async (req) => {
 
     if (evErr) return serverError("Error cargando parish_events.", { detail: evErr.message });
 
+    // Invitados de los eventos específicos: a los demás no les cuentan.
+    const eventIds = (evs ?? []).map((e: any) => String(e.id));
+    const inviteesByEvent = new Map<string, Set<string>>();
+
+    if (eventIds.length > 0) {
+      const { data: inviteeRows, error: invErr } = await admin
+        .from("parish_event_invitees")
+        .select("event_id, profile_id")
+        .in("event_id", eventIds);
+
+      if (invErr) {
+        return serverError("Error cargando parish_event_invitees.", { detail: invErr.message });
+      }
+
+      for (const r of inviteeRows ?? []) {
+        const key = String((r as any).event_id);
+        const set = inviteesByEvent.get(key) ?? new Set<string>();
+        set.add(String((r as any).profile_id));
+        inviteesByEvent.set(key, set);
+      }
+    }
+
     const nClass = (classDays ?? []).length;
     const nEvents = (evs ?? []).length;
 
-    const eventsForStageGrades = (stageGrades: StageGrade[]) =>
-      (evs ?? []).filter((e: any) => eventAppliesTo(e, stageGrades));
+    // Los eventos que cuentan para un catequista: los que van dirigidos a él y
+    // además cuentan para la asistencia.
+    const eventsCountingFor = (profileId: string, stageGrades: StageGrade[]) =>
+      (evs ?? []).filter(
+        (e: any) =>
+          e.counts_for_attendance !== false &&
+          eventAppliesTo(e, profileId, stageGrades, inviteesByEvent)
+      );
 
     // attendance catequistas: días lectivos (catechist_attendance) y eventos
     // (catechist_attendance_events) van en tablas distintas.
@@ -663,7 +709,10 @@ serve(async (req) => {
     // Agregación simple: contamos asistencias "present"/"late" como asistencia.
     const byP = new Map<string, { classAttend: number; classPossible: number; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
     for (const pid of catechistIds) {
-      const applicable = eventsForStageGrades(stageGradesById.get(String(pid)) ?? []);
+      const applicable = eventsCountingFor(
+        String(pid),
+        stageGradesById.get(String(pid)) ?? []
+      );
       byP.set(pid, {
         classAttend: 0,
         classPossible: nClass * 2,
@@ -690,7 +739,8 @@ serve(async (req) => {
       const pid = String((r as any).profile_id);
       const obj = byP.get(pid);
       if (!obj) continue;
-      // Un evento de otra etapa u otro curso no cuenta ni a favor ni en contra.
+      // Un evento de otra etapa, de otro curso, al que no estaba invitado o que
+      // no cuenta para la asistencia no suma ni a favor ni en contra.
       if (!obj.eventIds.has(String((r as any).event_id))) continue;
 
       const st = (r as any).status;
@@ -719,7 +769,7 @@ serve(async (req) => {
         `ÁMBITO: Equipo de catequistas${callerStage ? ` de ${STAGE_LABELS[callerStage]}` : ""}`,
         `PERIODO: ${start} a ${todayISO}`,
         `DÍAS LECTIVOS: ${nClass} (cada uno cuenta catequesis+misa)`,
-        `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los de su etapa y curso)`,
+        `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los que van dirigidos a él y cuentan para la asistencia)`,
         ``,
         `PARTICIPACIÓN MÁS BAJA:`,
         ...low.map((r) => `- ${r.name}: ${r.rate}% (asistencias=${r.attended}/${r.possible})`),

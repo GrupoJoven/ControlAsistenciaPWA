@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { Calendar, Lock, Plus } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Calendar, Lock, Plus, Search, UserCheck, Users } from "lucide-react";
 import { ParishEvent, User } from "../types";
+import { normalizeSearchText } from "../src/utils/text";
 import {
   ALL_GRADES,
   EventGrade,
@@ -16,11 +17,27 @@ import {
 interface AgendaManagerProps {
   currentUser: User;
   events: ParishEvent[];
-  onAdd: (e: { title: string; date: string; stage: EventStage; grade: EventGrade }) => void;
+  /** Perfiles a los que se puede invitar a un evento específico. */
+  users: User[];
+  onAdd: (e: {
+    title: string;
+    date: string;
+    stage: EventStage;
+    grade: EventGrade;
+    inviteOnly: boolean;
+    countsForAttendance: boolean;
+    inviteeIds: string[];
+  }) => void;
   onRemove: (id: string) => void;
 }
 
-const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAdd, onRemove }) => {
+const AgendaManager: React.FC<AgendaManagerProps> = ({
+  currentUser,
+  events,
+  users,
+  onAdd,
+  onRemove,
+}) => {
   const isGlobal = isGlobalCoordinator(currentUser);
 
   // El coordinador global elige a quién afecta el evento; el de etapa solo
@@ -31,27 +48,69 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
   const [newDateTime, setNewDateTime] = useState("");
   const [newStage, setNewStage] = useState<EventStage>(fixedStage ?? "all");
   const [newGrade, setNewGrade] = useState<EventGrade>(0);
+  const [inviteOnly, setInviteOnly] = useState(false);
+  const [countsForAttendance, setCountsForAttendance] = useState(true);
+  const [inviteeIds, setInviteeIds] = useState<string[]>([]);
+  const [inviteeQuery, setInviteeQuery] = useState("");
   const [eventToDelete, setEventToDelete] = useState<ParishEvent | null>(null);
 
-  const stage = fixedStage ?? newStage;
+  // En un evento específico la etapa solo decide quién lo gestiona (y RLS la
+  // comprueba), no a quién va dirigido: eso lo dice la lista de invitados.
+  const stage = inviteOnly ? (fixedStage ?? "all") : (fixedStage ?? newStage);
 
   // Un evento de un solo curso lo es de un curso de UNA etapa: no hay eventos
   // para los primeros de las dos a la vez, serían dos eventos distintos.
-  const grade: EventGrade = stage === "all" ? 0 : newGrade;
+  const grade: EventGrade = inviteOnly || stage === "all" ? 0 : newGrade;
+
+  const candidates = useMemo(
+    () =>
+      users
+        .filter((u) => u.role === "catechist" || u.role === "coordinator")
+        .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" })),
+    [users]
+  );
+
+  const filteredCandidates = useMemo(() => {
+    const query = normalizeSearchText(inviteeQuery);
+    if (!query) return candidates;
+    return candidates.filter((u) => normalizeSearchText(u.name).includes(query));
+  }, [candidates, inviteeQuery]);
+
+  const nameById = useMemo(
+    () => new Map(users.map((u) => [u.id, u.name])),
+    [users]
+  );
+
+  const toggleInvitee = (id: string) =>
+    setInviteeIds((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+    );
+
+  const canAdd = !!newTitle && !!newDateTime && (!inviteOnly || inviteeIds.length > 0);
 
   const handleAdd = () => {
-    if (!newTitle || !newDateTime) return;
+    if (!canAdd) return;
 
     onAdd({
       title: newTitle,
       date: newDateTime,
       stage,
       grade,
+      inviteOnly,
+      countsForAttendance: inviteOnly ? countsForAttendance : true,
+      inviteeIds: inviteOnly ? inviteeIds : [],
     });
 
     setNewTitle("");
     setNewDateTime("");
   };
+
+  /** Invitados de un evento, con los nombres que este usuario pueda leer. */
+  const inviteeLabel = (event: ParishEvent): string =>
+    event.inviteeIds
+      .map((id) => nameById.get(id) ?? "¿?")
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+      .join(", ");
 
   return (
     <>
@@ -104,6 +163,33 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
 
+          {/* Dos clases de evento: el de siempre, dirigido a una etapa y un
+              curso, y el específico, que solo les llega a los invitados. */}
+          <div className="flex gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => setInviteOnly(false)}
+              className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                !inviteOnly
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+              }`}
+            >
+              <Users size={14} /> Por etapa y curso
+            </button>
+            <button
+              type="button"
+              onClick={() => setInviteOnly(true)}
+              className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                inviteOnly
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+              }`}
+            >
+              <UserCheck size={14} /> Solo invitados
+            </button>
+          </div>
+
           {/* Varias filas: con los selectores de etapa y curso, título + fecha +
               etapa + curso + botón no caben en una sola dentro de max-w-2xl y
               el botón se salía. */}
@@ -124,55 +210,140 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
                 onChange={(e) => setNewDateTime(e.target.value)}
               />
 
-              {fixedStage ? (
-                <div
-                  className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-600 flex items-center gap-2 w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
-                  title="Solo puedes crear eventos de tu etapa"
-                >
-                  <Lock size={14} className="text-slate-400 shrink-0" />
-                  {STAGE_LABELS[fixedStage]}
-                </div>
-              ) : (
-                <select
-                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
-                  value={newStage}
-                  onChange={(e) => setNewStage(e.target.value as EventStage)}
-                  title="¿A qué etapa afecta el evento?"
-                >
-                  <option value="all">{STAGE_LABELS.all}</option>
-                  <option value="preconfirmation">{STAGE_LABELS.preconfirmation}</option>
-                  <option value="confirmation">{STAGE_LABELS.confirmation}</option>
-                </select>
-              )}
+              {!inviteOnly &&
+                (fixedStage ? (
+                  <div
+                    className="px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-600 flex items-center gap-2 w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
+                    title="Solo puedes crear eventos de tu etapa"
+                  >
+                    <Lock size={14} className="text-slate-400 shrink-0" />
+                    {STAGE_LABELS[fixedStage]}
+                  </div>
+                ) : (
+                  <select
+                    className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px]"
+                    value={newStage}
+                    onChange={(e) => setNewStage(e.target.value as EventStage)}
+                    title="¿A qué etapa afecta el evento?"
+                  >
+                    <option value="all">{STAGE_LABELS.all}</option>
+                    <option value="preconfirmation">{STAGE_LABELS.preconfirmation}</option>
+                    <option value="confirmation">{STAGE_LABELS.confirmation}</option>
+                  </select>
+                ))}
 
               {/* Un evento de "ambas etapas" es para todo el mundo: elegir un
                   curso dentro de las dos no tendría sentido. */}
-              <select
-                className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px] disabled:bg-slate-100 disabled:text-slate-400"
-                value={grade}
-                disabled={stage === "all"}
-                onChange={(e) => setNewGrade(Number(e.target.value) as EventGrade)}
-                title={
-                  stage === "all"
-                    ? "Un evento de ambas etapas es para todos los cursos"
-                    : "¿A qué curso de la etapa afecta el evento?"
-                }
-              >
-                <option value={0}>{GRADE_LABELS[0]}</option>
-                {ALL_GRADES.map((g) => (
-                  <option key={g} value={g}>
-                    Solo {GRADE_LABELS[g]} curso
-                  </option>
-                ))}
-              </select>
+              {!inviteOnly && (
+                <select
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-full sm:w-auto sm:flex-1 sm:min-w-[150px] disabled:bg-slate-100 disabled:text-slate-400"
+                  value={grade}
+                  disabled={stage === "all"}
+                  onChange={(e) => setNewGrade(Number(e.target.value) as EventGrade)}
+                  title={
+                    stage === "all"
+                      ? "Un evento de ambas etapas es para todos los cursos"
+                      : "¿A qué curso de la etapa afecta el evento?"
+                  }
+                >
+                  <option value={0}>{GRADE_LABELS[0]}</option>
+                  {ALL_GRADES.map((g) => (
+                    <option key={g} value={g}>
+                      Solo {GRADE_LABELS[g]} curso
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <button
                 onClick={handleAdd}
-                className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0"
+                disabled={!canAdd}
+                title={
+                  inviteOnly && inviteeIds.length === 0
+                    ? "Selecciona al menos un invitado"
+                    : "Añadir evento"
+                }
+                className="w-full sm:w-auto p-2 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 disabled:bg-slate-200 disabled:text-slate-400"
               >
                 <Plus size={24} />
               </button>
             </div>
+
+            {inviteOnly && (
+              <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">
+                    Invitados · {inviteeIds.length}
+                  </span>
+                  {inviteeIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setInviteeIds([])}
+                      className="text-xs font-bold text-slate-500 hover:text-red-600"
+                    >
+                      Quitar todos
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <Search
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
+                    value={inviteeQuery}
+                    onChange={(e) => setInviteeQuery(e.target.value)}
+                  />
+                </div>
+
+                <div className="max-h-56 overflow-y-auto rounded-xl bg-white border border-slate-200 divide-y divide-slate-50">
+                  {filteredCandidates.map((u) => {
+                    const checked = inviteeIds.includes(u.id);
+
+                    return (
+                      <label
+                        key={u.id}
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-indigo-600 shrink-0"
+                          checked={checked}
+                          onChange={() => toggleInvitee(u.id)}
+                        />
+                        <span className="text-sm text-slate-700 truncate">{u.name}</span>
+                      </label>
+                    );
+                  })}
+
+                  {filteredCandidates.length === 0 && (
+                    <p className="px-3 py-4 text-xs text-slate-400 text-center">
+                      Nadie con ese nombre.
+                    </p>
+                  )}
+                </div>
+
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-indigo-600 shrink-0"
+                    checked={countsForAttendance}
+                    onChange={(e) => setCountsForAttendance(e.target.checked)}
+                  />
+                  <span className="text-sm text-slate-700">
+                    Cuenta para el porcentaje de asistencia
+                  </span>
+                </label>
+
+                <p className="text-xs text-slate-500">
+                  Solo los invitados verán el evento en su agenda y recibirán el aviso.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -185,14 +356,14 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
             {events.map((event) => (
               <div
                 key={event.id}
-                className="p-4 flex items-center justify-between hover:bg-slate-50"
+                className="p-4 flex items-center justify-between gap-3 hover:bg-slate-50"
               >
-                <div className="flex items-center gap-4">
-                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg shrink-0">
                     <Calendar size={18} />
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-semibold text-slate-900">{event.title}</p>
                     <p className="text-xs text-slate-500">
                       {new Date(event.date).toLocaleString("es-ES", {
@@ -209,9 +380,27 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
                             : "bg-slate-100 text-slate-500"
                         }`}
                       >
-                        {getEventAudienceLabel(event)}
+                        {event.inviteOnly
+                          ? `${event.inviteeIds.length} invitado${
+                              event.inviteeIds.length === 1 ? "" : "s"
+                            }`
+                          : getEventAudienceLabel(event)}
                       </span>
+                      {!event.countsForAttendance && (
+                        <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700">
+                          No cuenta
+                        </span>
+                      )}
                     </p>
+
+                    {event.inviteOnly && event.inviteeIds.length > 0 && (
+                      <p
+                        className="text-[11px] text-slate-400 truncate"
+                        title={inviteeLabel(event)}
+                      >
+                        {inviteeLabel(event)}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -219,13 +408,13 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({ currentUser, events, onAd
                 {canManageEventStage(currentUser, event.stage) ? (
                   <button
                     onClick={() => setEventToDelete(event)}
-                    className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                    className="p-2 text-slate-300 hover:text-red-500 transition-colors shrink-0"
                   >
                     <Plus size={18} className="rotate-45" />
                   </button>
                 ) : (
                   <span
-                    className="p-2 text-slate-200"
+                    className="p-2 text-slate-200 shrink-0"
                     title="Este evento lo gestiona el coordinador global"
                   >
                     <Lock size={16} />

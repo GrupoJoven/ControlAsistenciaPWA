@@ -38,6 +38,9 @@
 --   3. Volver a desplegar las edge functions send-push-notifications y
 --      generate-monthly-report: la primera llama a profile_ids_for_stage(),
 --      que aquí cambia de firma (ahora recibe también el curso).
+--   4. event_invitees.sql, que añade los eventos específicos (por lista de
+--      invitados) y vuelve a sustituir la política de lectura de
+--      parish_events y can_see_event().
 -- ============================================================================
 
 
@@ -167,6 +170,8 @@ AS $$
 $$;
 
 -- Sustituye a can_see_event_stage(text): ahora también mira el curso.
+-- OJO: la sustituye can_see_event(_event_id, _stage, _grade, _invite_only) en
+-- event_invitees.sql, que además mira los invitados.
 CREATE OR REPLACE FUNCTION public.can_see_event(_stage text, _grade smallint)
 RETURNS boolean
 LANGUAGE sql
@@ -189,6 +194,7 @@ $$;
 
 DROP POLICY IF EXISTS "parish_events_select_visible" ON public.parish_events;
 
+-- La sustituye la de event_invitees.sql, que además mira los invitados.
 CREATE POLICY "parish_events_select_visible"
   ON public.parish_events
   FOR SELECT

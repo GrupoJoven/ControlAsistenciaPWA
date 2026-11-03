@@ -273,7 +273,12 @@ const Reports: React.FC<ReportsProps> = ({
         .map((d) => `${sanitize(d)} (Cat),${sanitize(d)} (Misa)`)
         .join(",");
       const eventDateHeaders = pastEvents
-        .map((e) => `${sanitize(e.date)} (${sanitize(e.title)})`)
+        .map(
+          (e) =>
+            `${sanitize(e.date)} (${sanitize(e.title)}${
+              e.countsForAttendance ? "" : " - no cuenta"
+            })`
+        )
         .join(",");
 
       headers = `Nombre,Grupo,Asistencia Total %,Email,${classDateHeaders}${
@@ -300,8 +305,8 @@ const Reports: React.FC<ReportsProps> = ({
 
           const eventDateValues = pastEvents
             .map((e) => {
-              // Un evento de otra etapa u otro curso no le afecta: ni presente
-              // ni ausente.
+              // Un evento de otra etapa, de otro curso o al que no estaba
+              // invitado no le afecta: ni presente ni ausente.
               if (!eventAppliesToUser(e, c)) return "-";
 
               const record = c.attendanceHistory?.find(

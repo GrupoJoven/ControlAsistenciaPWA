@@ -1,5 +1,5 @@
 import { AcademicYear, getAcademicYearCutoff, getCurrentAcademicYear } from './src/utils/academicYear';
-import { getEventsForStageGrades } from './src/utils/stages';
+import { getEventsCountingForUser } from './src/utils/stages';
 import type { EventGrade, EventStage, Stage, StageGrade } from './src/utils/stages';
 
 export type UserRole = 'catechist' | 'coordinator';
@@ -48,10 +48,23 @@ export interface ParishEvent {
   id: string;
   title: string;
   date: string;
-  /** A quién afecta: una etapa o las dos. */
+  /**
+   * A quién afecta: una etapa o las dos. En un evento específico
+   * (inviteOnly) solo dice quién lo gestiona, no a quién va dirigido.
+   */
   stage: EventStage;
   /** Curso de esa etapa al que va dirigido. 0 = todos los cursos. */
   grade: EventGrade;
+  /** Evento específico: solo lo ven (y les cuenta) los invitados. */
+  inviteOnly: boolean;
+  /** Si no cuenta, no entra en el porcentaje de asistencia de nadie. */
+  countsForAttendance: boolean;
+  /**
+   * Invitados, solo en eventos específicos. Es lo que RLS deja leer: un
+   * catequista solo ve su propia invitación, un coordinador las de los
+   * eventos que gestiona.
+   */
+  inviteeIds: string[];
   description?: string;
 }
 
@@ -158,8 +171,9 @@ export const calculateStudentRate = (
  * the given academic year. Defaults to the current academic year.
  *
  * Solo cuentan los eventos dirigidos al catequista: a uno de preconfirmación
- * no se le descuenta un evento de confirmación, ni a uno de 1º uno de 2º. Si
- * no se le han calculado etapas se usan todos los eventos recibidos.
+ * no se le descuenta un evento de confirmación, ni a uno de 1º uno de 2º, ni
+ * un evento específico al que no estaba invitado. Los eventos marcados como
+ * que no cuentan para la asistencia quedan fuera para todo el mundo.
  */
 export const calculateCatechistRate = (
   catechist: User,
@@ -170,9 +184,9 @@ export const calculateCatechistRate = (
   const year = academicYear ?? getCurrentAcademicYear();
   const cutoff = getAcademicYearCutoff(year);
 
-  const applicableEvents = catechist.stageGrades
-    ? getEventsForStageGrades(events, catechist.stageGrades)
-    : events;
+  // Sin etapas calculadas solo le cuentan los eventos para todo el mundo: el
+  // lado seguro es no exigirle un evento que quizá no era para él.
+  const applicableEvents = getEventsCountingForUser(events, catechist);
 
   const pastClassDays = classDays.filter(day => day >= year.start && day <= cutoff);
   const pastEvents = applicableEvents.filter(e => e.date >= year.start && e.date <= cutoff);

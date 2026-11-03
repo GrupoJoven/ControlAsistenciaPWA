@@ -129,10 +129,11 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   const canShowTable =
     (mode === "class" && activeDate) || (mode === "event" && selectedEventId);
 
-  // En un evento dirigido a una etapa o a un curso solo se pasa lista a quien
-  // va dirigido: a un catequista de preconfirmación no se le apunta falta en un
-  // evento de confirmación, ni a uno de 1º en uno de 2º. En días lectivos y
-  // eventos para todos salen todos.
+  // En un evento dirigido a una etapa, a un curso o a unos invitados solo se
+  // pasa lista a quien va dirigido: a un catequista de preconfirmación no se le
+  // apunta falta en un evento de confirmación, ni a uno de 1º en uno de 2º, ni
+  // a nadie en un evento al que no estaba invitado. En días lectivos y eventos
+  // para todos salen todos.
   const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
   const visibleUsers =
     mode === "event" && selectedEvent
@@ -236,7 +237,24 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
         </div>
       )}
 
-      {canShowTable ? (
+      {mode === "event" && selectedEvent && !selectedEvent.countsForAttendance && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
+          Este evento <span className="font-bold">no cuenta</span> para el porcentaje
+          de asistencia. Puedes pasar lista igualmente para dejar constancia.
+        </div>
+      )}
+
+      {mode === "event" && selectedEvent && visibleUsers.length === 0 && (
+        <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border-2 border-dashed border-slate-100">
+          <Filter size={48} className="mx-auto mb-4 opacity-20" />
+          <p className="font-bold">Nadie a quien pasar lista</p>
+          <p className="text-xs sm:text-sm">
+            Este evento no va dirigido a ninguno de los catequistas que puedes ver.
+          </p>
+        </div>
+      )}
+
+      {canShowTable && visibleUsers.length > 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <table className="w-full text-left table-fixed">
             <thead>
