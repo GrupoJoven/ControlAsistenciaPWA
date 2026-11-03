@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Calendar, Lock, Plus, Search, UserCheck, Users } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Calendar, Check, Lock, Plus, Search, UserCheck, Users } from "lucide-react";
 import { ParishEvent, User } from "../types";
 import { normalizeSearchText } from "../src/utils/text";
 import {
@@ -19,6 +19,7 @@ interface AgendaManagerProps {
   events: ParishEvent[];
   /** Perfiles a los que se puede invitar a un evento específico. */
   users: User[];
+  /** Devuelve true si el evento se ha creado: solo entonces se limpia todo. */
   onAdd: (e: {
     title: string;
     date: string;
@@ -27,7 +28,7 @@ interface AgendaManagerProps {
     inviteOnly: boolean;
     countsForAttendance: boolean;
     inviteeIds: string[];
-  }) => void;
+  }) => Promise<boolean>;
   onRemove: (id: string) => void;
 }
 
@@ -52,7 +53,18 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
   const [countsForAttendance, setCountsForAttendance] = useState(true);
   const [inviteeIds, setInviteeIds] = useState<string[]>([]);
   const [inviteeQuery, setInviteeQuery] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
   const [eventToDelete, setEventToDelete] = useState<ParishEvent | null>(null);
+
+  // El aviso de "evento creado" se va solo: si se quedara fijo, al rato ya no
+  // se sabría a qué evento se refiere.
+  useEffect(() => {
+    if (!created) return;
+
+    const timer = window.setTimeout(() => setCreated(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [created]);
 
   // En un evento específico la etapa solo decide quién lo gestiona (y RLS la
   // comprueba), no a quién va dirigido: eso lo dice la lista de invitados.
@@ -88,10 +100,39 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
 
   const canAdd = !!newTitle && !!newDateTime && (!inviteOnly || inviteeIds.length > 0);
 
-  const handleAdd = () => {
-    if (!canAdd) return;
+  const formatDateTime = (value: string) =>
+    new Date(value).toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-    onAdd({
+  /** Vuelve a dejar el formulario como al entrar. */
+  const resetForm = () => {
+    setNewTitle("");
+    setNewDateTime("");
+    setNewStage(fixedStage ?? "all");
+    setNewGrade(0);
+    setInviteOnly(false);
+    setCountsForAttendance(true);
+    setInviteeIds([]);
+    setInviteeQuery("");
+  };
+
+  const handleAdd = async () => {
+    if (!canAdd || isSaving) return;
+
+    // El formulario se limpia DESPUÉS de saber que el evento está creado: si
+    // falla, el coordinador no tiene que volver a escribirlo todo.
+    const titleCreated = newTitle;
+    const dateCreated = newDateTime;
+
+    setIsSaving(true);
+    setCreated(null);
+
+    const ok = await onAdd({
       title: newTitle,
       date: newDateTime,
       stage,
@@ -101,8 +142,12 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
       inviteeIds: inviteOnly ? inviteeIds : [],
     });
 
-    setNewTitle("");
-    setNewDateTime("");
+    setIsSaving(false);
+
+    if (!ok) return;
+
+    resetForm();
+    setCreated(`${titleCreated} · ${formatDateTime(dateCreated)}`);
   };
 
   /** Invitados de un evento, con los nombres que este usuario pueda leer. */
@@ -124,16 +169,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
             <p className="text-slate-600 mb-6">
               ¿Seguro que quieres eliminar el evento
               <span className="font-semibold"> "{eventToDelete.title}"</span> del día
-              <span className="font-semibold">
-                {" "}
-                {new Date(eventToDelete.date).toLocaleString("es-ES", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
+              <span className="font-semibold"> {formatDateTime(eventToDelete.date)}</span>
               ?
             </p>
 
@@ -162,6 +198,15 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
       <div className="space-y-6 max-w-2xl mx-auto">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
+
+          {created && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              <Check size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Evento creado: <span className="font-bold">{created}</span>
+              </span>
+            </div>
+          )}
 
           {/* Dos clases de evento: el de siempre, dirigido a una etapa y un
               curso, y el específico, que solo les llega a los invitados. */}
@@ -256,8 +301,8 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
               )}
 
               <button
-                onClick={handleAdd}
-                disabled={!canAdd}
+                onClick={() => void handleAdd()}
+                disabled={!canAdd || isSaving}
                 title={
                   inviteOnly && inviteeIds.length === 0
                     ? "Selecciona al menos un invitado"
@@ -366,13 +411,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-900">{event.title}</p>
                     <p className="text-xs text-slate-500">
-                      {new Date(event.date).toLocaleString("es-ES", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatDateTime(event.date)}
                       <span
                         className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
                           isTargetedEvent(event)

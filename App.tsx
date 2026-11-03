@@ -1346,15 +1346,15 @@ const App: React.FC = () => {
     inviteOnly: boolean;
     countsForAttendance: boolean;
     inviteeIds: string[];
-  }) => {
-  if (blockIfOffline("añadir evento a la agenda")) return;
+  }): Promise<boolean> => {
+  if (blockIfOffline("añadir evento a la agenda")) return false;
 
     const inviteeIds = event.inviteOnly ? [...new Set(event.inviteeIds)] : [];
 
     // Un evento específico sin invitados no le saldría a nadie en la agenda.
     if (event.inviteOnly && inviteeIds.length === 0) {
       alert("Un evento específico necesita al menos un invitado.");
-      return;
+      return false;
     }
 
     const { data, error } = await supabase
@@ -1372,7 +1372,7 @@ const App: React.FC = () => {
 
     if (error) {
       alert("Error al añadir evento: " + error.message);
-      return;
+      return false;
     }
 
     if (inviteeIds.length > 0) {
@@ -1385,7 +1385,7 @@ const App: React.FC = () => {
       if (inviteesError) {
         await supabase.from("parish_events").delete().eq("id", data.id);
         alert("Error al guardar los invitados: " + inviteesError.message);
-        return;
+        return false;
       }
     }
 
@@ -1438,6 +1438,9 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error inesperado enviando push:", e);
     }
+
+    // El evento ya está creado: que falle el aviso no lo deshace.
+    return true;
   };
 
   const setCatechistInGroup = async (profileId: string, groupId: string, assign: boolean) => {
@@ -2093,7 +2096,7 @@ const App: React.FC = () => {
               currentUser={currentUser}
               events={visibleEvents}
               users={usersWithStages}
-              onAdd={(e) => void addEvent(e)}
+              onAdd={addEvent}
               onRemove={(id) => void removeEvent(id)}
             />
           )}
