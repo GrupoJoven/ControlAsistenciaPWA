@@ -1443,6 +1443,112 @@ const App: React.FC = () => {
     return true;
   };
 
+  /**
+   * Editar un evento ya creado: título, fecha y a quién va dirigido. No se
+   * puede cambiar la CLASE de evento (de etapa a solo invitados o al revés):
+   * eso cambiaría a quién le cuenta la asistencia ya pasada.
+   */
+  const updateEvent = async (
+    id: string,
+    changes: {
+      title: string;
+      date: string;
+      stage: EventStage;
+      grade: EventGrade;
+      countsForAttendance: boolean;
+      inviteeIds: string[];
+    }
+  ): Promise<boolean> => {
+    if (blockIfOffline("editar el evento")) return false;
+
+    const current = events.find(e => e.id === id);
+
+    if (!current) {
+      alert("No se ha encontrado el evento.");
+      return false;
+    }
+
+    const inviteeIds = current.inviteOnly ? [...new Set(changes.inviteeIds)] : [];
+
+    if (current.inviteOnly && inviteeIds.length === 0) {
+      alert("Un evento específico necesita al menos un invitado.");
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from("parish_events")
+      .update({
+        title: changes.title,
+        date: changes.date,
+        stage: changes.stage,
+        grade: changes.grade,
+        counts_for_attendance: changes.countsForAttendance,
+      })
+      .eq("id", id)
+      .select("id, title, date, stage, grade, invite_only, counts_for_attendance")
+      .single();
+
+    if (error) {
+      alert("Error al editar el evento: " + error.message);
+      return false;
+    }
+
+    if (current.inviteOnly) {
+      // Primero se añaden los nuevos y luego se quitan los que sobran: al
+      // revés, un fallo entre las dos consultas podría dejar el evento sin
+      // invitados, y entonces no lo vería nadie.
+      const toAdd = inviteeIds.filter(pid => !current.inviteeIds.includes(pid));
+      const toRemove = current.inviteeIds.filter(pid => !inviteeIds.includes(pid));
+
+      if (toAdd.length > 0) {
+        const { error: addError } = await supabase
+          .from("parish_event_invitees")
+          .insert(toAdd.map((profileId) => ({ event_id: id, profile_id: profileId })));
+
+        if (addError) {
+          alert("Error al añadir invitados: " + addError.message);
+          return false;
+        }
+      }
+
+      if (toRemove.length > 0) {
+        // Si a alguien ya le habían pasado lista, su registro se queda: el
+        // evento deja de contarle (no está invitado) y si vuelve a entrar en
+        // la lista no hay que volver a apuntarlo.
+        const { error: removeError } = await supabase
+          .from("parish_event_invitees")
+          .delete()
+          .eq("event_id", id)
+          .in("profile_id", toRemove);
+
+        if (removeError) {
+          alert("Error al quitar invitados: " + removeError.message);
+          return false;
+        }
+      }
+    }
+
+    const updatedEvent: ParishEvent = {
+      ...current,
+      title: data.title,
+      date: String(data.date),
+      stage: (data.stage as EventStage) ?? changes.stage,
+      grade: toEventGrade(data.grade ?? changes.grade),
+      countsForAttendance: toCountsForAttendance(
+        data.counts_for_attendance ?? changes.countsForAttendance
+      ),
+      inviteeIds,
+    };
+
+    setEvents(prev =>
+      prev
+        .map(e => (e.id === id ? updatedEvent : e))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    );
+
+    return true;
+  };
+
   const setCatechistInGroup = async (profileId: string, groupId: string, assign: boolean) => {
     if (blockIfOffline(assign ? "asignar el catequista al grupo" : "desasignar el catequista del grupo")) return;
     if (assign) {
@@ -2097,6 +2203,7 @@ const App: React.FC = () => {
               events={visibleEvents}
               users={usersWithStages}
               onAdd={addEvent}
+              onUpdate={updateEvent}
               onRemove={(id) => void removeEvent(id)}
             />
           )}
