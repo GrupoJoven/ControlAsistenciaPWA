@@ -21,7 +21,7 @@ import {
   getTodayStr,
   AttendanceStatus,
 } from "../types";
-import { AcademicYear, getAcademicYearCutoff } from "../src/utils/academicYear";
+import { AcademicYear, getAcademicYearCutoff, isPastEvent } from "../src/utils/academicYear";
 import { EventStage, STAGE_LABELS, eventAppliesToUser } from "../src/utils/stages";
 
 interface ReportsProps {
@@ -116,12 +116,14 @@ const Reports: React.FC<ReportsProps> = ({
     [classDays, start, end]
   );
 
+  // Los eventos cuentan desde su fecha y su hora, no desde el día siguiente:
+  // misma regla que calculateCatechistRate.
   const pastEvents = useMemo(
     () =>
       events
-        .filter((e) => e.date >= start && e.date <= end)
+        .filter((e) => isPastEvent(e.date, academicYear))
         .sort((a, b) => a.date.localeCompare(b.date)),
-    [events, start, end]
+    [events, academicYear]
   );
 
   // --- Helpers CSV ---

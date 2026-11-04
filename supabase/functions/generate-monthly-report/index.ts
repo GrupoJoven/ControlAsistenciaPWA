@@ -464,6 +464,28 @@ serve(async (req) => {
     day: "2-digit",
   }).format(new Date()); // "YYYY-MM-DD" en formato en-CA
 
+  // Hora local de Madrid, "YYYY-MM-DD HH:mm:ss". parish_events.date es un
+  // timestamp sin zona (hora local), así que para saber qué eventos han pasado
+  // ya hay que compararlo con la hora de aquí y no con la UTC del servidor.
+  // Un evento cuenta para la asistencia desde su fecha Y su hora: misma regla
+  // que isPastEvent() en src/utils/academicYear.ts.
+  const nowMadrid = (() => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+
+    return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}`;
+  })();
+
   const { start, end } = getAcademicYearRange(todayISO);
 
   let payload: any = null;
@@ -642,7 +664,7 @@ serve(async (req) => {
       .from("parish_events")
       .select("id, title, date, stage, grade, invite_only, counts_for_attendance")
       .gte("date", start)
-      .lte("date", todayISO);
+      .lte("date", nowMadrid);
 
     if (callerStage) evQuery = evQuery.in("stage", ["all", callerStage]);
 

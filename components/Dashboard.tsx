@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Student, calculateAttendanceWeight, ParishEvent, calculateStudentRate, getTodayStr, AttendanceRecord } from '../types';
-import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import { AcademicYear, getAcademicYearCutoff, getEventTimestamp } from '../src/utils/academicYear';
 import { getEventAudienceLabel, isTargetedEvent } from '../src/utils/stages';
 
 interface DashboardProps {
@@ -43,17 +43,14 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
 
   // Solo los eventos que aún no han pasado, ordenados de más próximo a más
   // lejano. No se filtra por curso a propósito (ver DashboardProps.events).
+  // Es el espejo de isPastEvent(): un evento sale de "Próximos Eventos" justo
+  // cuando empieza a contar para la asistencia.
   const upcomingEvents = useMemo(() => {
     const nowTs = Date.now();
 
-    // parish_events.date es "timestamp without time zone", así que llega como
-    // "2026-09-11T18:00:00" y se interpreta en hora local. El replace cubre la
-    // variante con espacio ("2026-09-11 18:00:00"), que Safari no sabe parsear.
-    const toTs = (date: string) => new Date(String(date).replace(" ", "T")).getTime();
-
     return events
       .filter(event => {
-        const ts = toTs(event.date);
+        const ts = getEventTimestamp(event.date);
         return Number.isFinite(ts) && ts >= nowTs;
       })
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));

@@ -87,6 +87,45 @@ export const getAcademicYearCutoff = (year: AcademicYear): string => {
 };
 
 /**
+ * Instante de un evento de la agenda. parish_events.date es un "timestamp
+ * without time zone", así que llega como "2026-09-11T18:00:00" y se
+ * interpreta en hora local. El replace cubre la variante con espacio
+ * ("2026-09-11 18:00:00"), que Safari no sabe parsear. NaN si no se entiende.
+ */
+export const getEventTimestamp = (date: string): number =>
+  new Date(String(date).replace(" ", "T")).getTime();
+
+/**
+ * ¿Es un evento de este curso que ya ha pasado? Un evento cuenta para la
+ * asistencia desde su fecha Y SU HORA: a las 18:00, de uno que empieza a las
+ * 19:00 todavía no se puede haber pasado lista, así que no debe contar como
+ * ausencia de nadie.
+ *
+ * El día se compara con la ventana del curso y la hora con el momento actual
+ * en vez de usar getAcademicYearCutoff(), que es un día entero y dejaría los
+ * eventos de hoy fuera hasta mañana.
+ *
+ * Esta regla tiene que coincidir con la de la edge function
+ * generate-monthly-report, que acota la consulta de parish_events a la hora
+ * local de Madrid. Si cambias una, cambia la otra.
+ */
+export const isPastEvent = (
+  date: string,
+  year: AcademicYear,
+  now: number = Date.now()
+): boolean => {
+  const day = String(date).slice(0, 10);
+
+  if (day < year.start || day > year.end) return false;
+
+  const timestamp = getEventTimestamp(date);
+
+  // Sin hora reconocible se compara solo el día, como cuando los eventos de
+  // la agenda no tenían hora.
+  return Number.isNaN(timestamp) ? day <= todayStr() : timestamp <= now;
+};
+
+/**
  * Cursos con datos, del más reciente al más antiguo. El curso actual se
  * incluye siempre aunque todavía no tenga ningún registro.
  */

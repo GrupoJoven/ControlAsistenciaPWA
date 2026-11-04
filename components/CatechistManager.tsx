@@ -22,7 +22,7 @@ import {
   Key
 } from 'lucide-react';
 import { User, Group, CatechistAttendanceRecord, AttendanceStatus, ParishEvent, calculateCatechistRate } from '../types';
-import { AcademicYear, getAcademicYearCutoff } from '../src/utils/academicYear';
+import { AcademicYear, getAcademicYearCutoff, isPastEvent } from '../src/utils/academicYear';
 import { getEventsForUser } from '../src/utils/stages';
 
 interface CatechistManagerProps {
@@ -95,7 +95,9 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     // los de las etapas del catequista (más los de 'all'): los de la otra
     // etapa no le afectan y no deben aparecer como ausencias.
     const relevantClassDays = classDays.filter(d => d >= academicYear.start && d <= end);
-    const relevantEvents = getEventsForUser(events, user).filter(e => e.date >= academicYear.start && e.date <= end);
+    const relevantEvents = getEventsForUser(events, user).filter(e =>
+      isPastEvent(e.date, academicYear)
+    );
 
     // 1) Clases (catechist_attendance)
     const { data: classRows, error: classErr } = await supabase

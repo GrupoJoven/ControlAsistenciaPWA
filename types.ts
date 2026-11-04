@@ -1,4 +1,4 @@
-import { AcademicYear, getAcademicYearCutoff, getCurrentAcademicYear } from './src/utils/academicYear';
+import { AcademicYear, getAcademicYearCutoff, getCurrentAcademicYear, isPastEvent } from './src/utils/academicYear';
 import { getEventsCountingForUser } from './src/utils/stages';
 import type { EventGrade, EventStage, Stage, StageGrade } from './src/utils/stages';
 
@@ -188,8 +188,9 @@ export const calculateCatechistRate = (
   // lado seguro es no exigirle un evento que quizá no era para él.
   const applicableEvents = getEventsCountingForUser(events, catechist);
 
+  // Un día lectivo cuenta desde que empieza el día; un evento, desde su hora.
   const pastClassDays = classDays.filter(day => day >= year.start && day <= cutoff);
-  const pastEvents = applicableEvents.filter(e => e.date >= year.start && e.date <= cutoff);
+  const pastEvents = applicableEvents.filter(e => isPastEvent(e.date, year));
 
   const totalOccurrences = pastClassDays.length + pastEvents.length;
   if (totalOccurrences === 0) return 100;
