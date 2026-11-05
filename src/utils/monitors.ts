@@ -227,5 +227,17 @@ export const calculateMonitorRate = (
   return Math.round((earnedPoints / totalOccurrences) * 100);
 };
 
+/**
+ * Cómo se guarda el nombre de un monitor: en mayúsculas y sin espacios en los
+ * extremos. La regla la impone además un trigger de la base de datos
+ * (supabase/sql/monitors_name_upper.sql), que es lo que la garantiza para
+ * cualquier camino de escritura; esto es para que el estado local y la
+ * pantalla digan ya lo mismo que la tabla, sin esperar a recargar.
+ *
+ * Para el campo mientras se escribe NO sirve: recortar los espacios a cada
+ * tecla impediría separar las palabras. Allí basta con toUpperCase().
+ */
+export const toMonitorName = (name: string): string => name.trim().toUpperCase();
+
 export const sortMonitorsByName = (monitors: Monitor[]): Monitor[] =>
   [...monitors].sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));

@@ -529,12 +529,15 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
                   Nombre
                   {isAdding && <span className="text-violet-600 ml-1">*</span>}
                 </label>
+                {/* En mayúsculas mientras se escribe: es como se guarda (lo
+                    impone un trigger de la BD), así que se ve desde el primer
+                    momento lo que va a quedar en la ficha. */}
                 <input
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => setName(e.target.value.toUpperCase())}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-violet-500"
-                  placeholder="Nombre y apellidos"
+                  placeholder="NOMBRE Y APELLIDOS"
                 />
               </div>
 

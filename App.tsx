@@ -64,6 +64,7 @@ import {
   MonitorSlot,
   getMeetingsForStage,
   getMonitorStageConfig,
+  toMonitorName,
 } from './src/utils/monitors';
 import { canSeeView } from './src/app/navigation';
 import Dashboard from './components/Dashboard';
@@ -2109,7 +2110,10 @@ const App: React.FC = () => {
       .from("monitors")
       .insert({
         stage: input.stage,
-        name: input.name,
+        // El nombre va en mayúsculas. Lo impone también un trigger de la BD
+        // (monitors_name_upper.sql); aquí se hace para que lo que se guarda en
+        // el estado local sea ya lo mismo que hay en la tabla.
+        name: toMonitorName(input.name),
         email: input.email || null,
         phone: input.phone || null,
         birth_date: input.birthDate || null,
@@ -2152,7 +2156,7 @@ const App: React.FC = () => {
       .from("monitors")
       .update({
         stage: monitor.stage,
-        name: monitor.name,
+        name: toMonitorName(monitor.name),
         email: monitor.email || null,
         phone: monitor.phone || null,
         birth_date: monitor.birthDate || null,
@@ -2166,7 +2170,11 @@ const App: React.FC = () => {
       return false;
     }
 
-    setMonitors(prev => prev.map(m => (m.id === monitor.id ? { ...m, ...monitor } : m)));
+    setMonitors(prev =>
+      prev.map(m =>
+        m.id === monitor.id ? { ...m, ...monitor, name: toMonitorName(monitor.name) } : m
+      )
+    );
     return true;
   };
 
@@ -2429,7 +2437,7 @@ const App: React.FC = () => {
       .from("monitors")
       .insert({
         stage,
-        name: user.name,
+        name: toMonitorName(user.name),
         email: user.email || null,
         birth_date: user.birthDate || null,
         role: "coordinator",
