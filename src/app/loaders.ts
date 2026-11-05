@@ -1,14 +1,18 @@
 import { supabase } from "../lib/supabaseClient";
 import { getOfflineData, saveOfflineData } from "../utils/offlineStorage";
 import { SchoolName, GroupCatechistLink } from "../types/app";
-import { Group, User, ParishEvent, Student, AttendanceRecord } from "../../types";
+import { Group, User, ParishEvent, Student, AttendanceRecord, AttendanceStatus } from "../../types";
 import {
   EventStage,
+  MONITOR_STAGES,
+  MonitorStage,
   Stage,
   getGroupStage,
+  isMonitorStage,
   toCountsForAttendance,
   toEventGrade,
 } from "../utils/stages";
+import type { Monitor, MonitorAttendanceRecord, MonitorRole } from "../utils/monitors";
 
 export const signMediaUrl = async (path?: string | null): Promise<string> => {
   if (!path) return "";
@@ -340,4 +344,147 @@ export const loadAttendance = async (): Promise<Map<string, AttendanceRecord[]>>
   }
 
   return attendanceByStudent;
+};
+// ---------------------------------------------------------------------------
+// Monitores de comunión y postcomunión
+//
+// RLS ya filtra por etapa: un coordinador de comunión solo recibe lo de
+// comunión y el general, las dos. Un catequista no recibe nada, así que estas
+// cargas devuelven listas vacías y no estorban.
+// ---------------------------------------------------------------------------
+
+const MONITOR_COLUMNS =
+  "id, stage, name, email, phone, birth_date, photo_path, role, active, profile_id, notes";
+
+export const loadMonitors = async (): Promise<Monitor[]> => {
+  let monitors: Monitor[] = [];
+
+  try {
+    const { data, error } = await supabase
+      .from("monitors")
+      .select(MONITOR_COLUMNS)
+      .order("name", { ascending: true });
+
+    if (error) throw error;
+
+    monitors = await Promise.all(
+      (data ?? []).map(async (row: any): Promise<Monitor> => ({
+        id: row.id,
+        stage: row.stage as MonitorStage,
+        name: row.name ?? "",
+        email: row.email ?? "",
+        phone: row.phone ?? "",
+        birthDate: row.birth_date ? String(row.birth_date).slice(0, 10) : "",
+        photoPath: row.photo_path ?? null,
+        photo: await signMediaUrl(row.photo_path),
+        role: (row.role as MonitorRole) ?? "monitor",
+        active: row.active !== false,
+        profileId: row.profile_id ?? null,
+        notes: row.notes ?? "",
+        attendanceHistory: [],
+      }))
+    );
+
+    // La foto firmada caduca, así que la caché guarda la ruta y no la URL.
+    await saveOfflineData(
+      "monitors",
+      monitors.map((monitor) => ({ ...monitor, photo: "" }))
+    );
+  } catch (error) {
+    console.warn("No se pudieron cargar los monitores desde Supabase, intentando offline", error);
+
+    const cached = await getOfflineData<Monitor[]>("monitors");
+
+    monitors = (cached?.data ?? []).filter((monitor) => isMonitorStage(monitor.stage));
+  }
+
+  return monitors;
+};
+
+/** Días de actividad por etapa. Comunión y postcomunión son independientes. */
+export const loadMonitorActivityDays = async (): Promise<Record<MonitorStage, string[]>> => {
+  const empty = (): Record<MonitorStage, string[]> => ({ communion: [], postcommunion: [] });
+
+  const group = (rows: { stage: string; date: string }[]): Record<MonitorStage, string[]> => {
+    const byStage = empty();
+
+    for (const row of rows) {
+      if (!isMonitorStage(row.stage)) continue;
+      byStage[row.stage].push(String(row.date).slice(0, 10));
+    }
+
+    for (const stage of MONITOR_STAGES) byStage[stage].sort();
+
+    return byStage;
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from("monitor_activity_days")
+      .select("stage, date")
+      .order("date", { ascending: true });
+
+    if (error) throw error;
+
+    const rows = (data ?? []).map((row: any) => ({ stage: String(row.stage), date: String(row.date) }));
+
+    await saveOfflineData("monitorActivityDays", rows);
+
+    return group(rows);
+  } catch (error) {
+    console.warn(
+      "No se pudieron cargar los días de actividad desde Supabase, intentando offline",
+      error
+    );
+
+    const cached = await getOfflineData<{ stage: string; date: string }[]>("monitorActivityDays");
+    return group(cached?.data ?? []);
+  }
+};
+
+/**
+ * Asistencia de los monitores, por monitor. Se trae entera (no solo la de
+ * hoy) porque el pase de lista de cualquier día y los porcentajes la necesitan,
+ * igual que con los catequistas.
+ */
+export const loadMonitorAttendance = async (): Promise<Map<string, MonitorAttendanceRecord[]>> => {
+  const byMonitor = new Map<string, MonitorAttendanceRecord[]>();
+
+  const push = (monitorId: string, record: MonitorAttendanceRecord) => {
+    const records = byMonitor.get(monitorId) ?? [];
+    records.push(record);
+    byMonitor.set(monitorId, records);
+  };
+
+  const { data: dayRows, error: dayError } = await supabase
+    .from("monitor_attendance")
+    .select("monitor_id, date, activity, mass");
+
+  if (dayError) throw dayError;
+
+  for (const row of dayRows ?? []) {
+    push(String(row.monitor_id), {
+      type: "activity",
+      date: String(row.date).slice(0, 10),
+      activity: ((row.activity ?? "absent") as AttendanceStatus),
+      mass: ((row.mass ?? "absent") as AttendanceStatus),
+    });
+  }
+
+  const { data: eventRows, error: eventError } = await supabase
+    .from("monitor_attendance_events")
+    .select("monitor_id, event_id, date, status");
+
+  if (eventError) throw eventError;
+
+  for (const row of eventRows ?? []) {
+    push(String(row.monitor_id), {
+      type: "event",
+      date: String(row.date).slice(0, 10),
+      refId: String(row.event_id),
+      status: ((row.status ?? "absent") as AttendanceStatus),
+    });
+  }
+
+  return byMonitor;
 };

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../src/lib/supabaseClient";
 import { Group, Student, User } from "../types";
-import { ALL_STAGES, STAGE_LABELS, Stage, isGlobalCoordinator } from "../src/utils/stages";
+import { CATECHESIS_STAGES, STAGE_LABELS, Stage, isGlobalCoordinator } from "../src/utils/stages";
 import AttachmentPicker, {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_MB,
@@ -161,7 +161,8 @@ const FamilyContact: React.FC<FamilyContactProps> = ({ currentUser, groups, stud
   );
 
   const sections = useMemo(() => {
-    const keys: (Stage | null)[] = [...ALL_STAGES, null];
+    // Solo las etapas con grupos: comunión y postcomunión no tienen niños.
+    const keys: (Stage | null)[] = [...CATECHESIS_STAGES, null];
     return keys
       .map((stage) => ({
         stage,

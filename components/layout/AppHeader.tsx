@@ -1,11 +1,12 @@
 import React from "react";
 import { Menu, Search } from "lucide-react";
-import { VIEW_TITLES } from "../../src/app/viewTitles";
-import { Group } from "../../types";
+import { getViewTitle } from "../../src/app/viewTitles";
+import { Group, User } from "../../types";
 import { View } from "../../src/types/app";
 import { AcademicYear } from "../../src/utils/academicYear";
 
 interface AppHeaderProps {
+  currentUser: User;
   currentView: View;
   currentGroupName: string;
   myGroups: Group[];
@@ -22,6 +23,7 @@ interface AppHeaderProps {
 }
 
 const AppHeader: React.FC<AppHeaderProps> = ({
+  currentUser,
   currentView,
   currentGroupName,
   myGroups,
@@ -36,10 +38,10 @@ const AppHeader: React.FC<AppHeaderProps> = ({
   onChangeAcademicYear,
   isCurrentAcademicYear,
 }) => {
+  const viewTitle = getViewTitle(currentView, currentUser);
+
   const title =
-    currentView === "students"
-      ? currentGroupName || VIEW_TITLES[currentView]
-      : VIEW_TITLES[currentView];
+    currentView === "students" ? currentGroupName || viewTitle : viewTitle;
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 lg:px-8 py-3 lg:py-4 flex items-center justify-between min-h-[64px]">

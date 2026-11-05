@@ -382,6 +382,12 @@ serve(async (req) => {
   // niños / equipo" son solo de su etapa y se guardan con esa stage. Los de
   // grupo llevan 'all' porque el grupo ya es de una etapa concreta. Tiene que
   // coincidir con lo que consulta Reports.tsx.
+  // Comunión y postcomunión no entran aquí: no tienen niños ni catequistas, y
+  // dejarles stage nula les daría el alcance del coordinador general.
+  if (isCoordinator && (prof.stage === "communion" || prof.stage === "postcommunion")) {
+    return forbidden("Los informes son de la catequesis: comunión y postcomunión no los generan.");
+  }
+
   const callerStage: Stage | null =
     isCoordinator && (prof.stage === "preconfirmation" || prof.stage === "confirmation")
       ? prof.stage

@@ -10,7 +10,7 @@ import {
   Settings,
   ShieldCheck,
   TriangleAlert,
-  User,
+  User as UserIcon,
   Users,
   Briefcase,
   HardDrive,
@@ -19,6 +19,8 @@ import {
   LucideIcon,
 } from "lucide-react";
 import { View } from "../types/app";
+import type { User } from "../../types";
+import { isGlobalCoordinator, isMonitorStageUser } from "../utils/stages";
 
 
 type Role = "coordinator" | "catechist";
@@ -27,6 +29,11 @@ export type NavigationSection = {
   id: string;
   label: string;
   accent?: "default" | "coordinator" | "supercoordinator";
+  /**
+   * Comunión y postcomunión no tienen grupos ni niños: a sus coordinadores no
+   * se les muestra esta sección.
+   */
+  hiddenForMonitorStage?: boolean;
   items: NavigationItem[];
 };
 
@@ -37,6 +44,13 @@ export type NavigationItem = {
   roles?: Role[];
   /** Solo para el coordinador general (coordinator sin etapa). */
   globalCoordinatorOnly?: boolean;
+  /** No se le muestra a los usuarios de comunión/postcomunión. */
+  hiddenForMonitorStage?: boolean;
+  /**
+   * Cómo se llama para ellos. La pantalla es la misma, pero lo que gestionan
+   * son monitores, días de actividad y reuniones, no niños ni días lectivos.
+   */
+  monitorLabel?: string;
 };
 
 export const NAVIGATION_SECTIONS: NavigationSection[] = [
@@ -46,7 +60,12 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     accent: "default",
     items: [
       { view: "dashboard", label: "Resumen", icon: BarChart3 },
-      { view: "school-calendar", label: "Calendario escolar", icon: CalendarDays },
+      {
+        view: "school-calendar",
+        label: "Calendario escolar",
+        icon: CalendarDays,
+        monitorLabel: "Calendario de actividades",
+      },
       { view: "drive", label: "Drive", icon: HardDrive },
     ],
   },
@@ -54,6 +73,7 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     id: "my-group",
     label: "Mi Grupo",
     accent: "default",
+    hiddenForMonitorStage: true,
     items: [
       { view: "attendance", label: "Pasar Lista", icon: CheckCircle2 },
       { view: "history", label: "Histórico", icon: CalendarDays },
@@ -67,15 +87,63 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     label: "Coordinación",
     accent: "coordinator",
     items: [
-      { view: "coordinator-groups", label: "Todos los Niños", icon: ShieldCheck, roles: ["coordinator"] },
-      { view: "catechists", label: "Registro Catequistas", icon: Briefcase, roles: ["coordinator"] },
-      { view: "catechist-attendance", label: "Asistencia Equipo", icon: CheckCircle2, roles: ["coordinator"] },
-      { view: "family-contact", label: "Contactar familias", icon: Send, roles: ["coordinator"] },
+      {
+        view: "coordinator-groups",
+        label: "Todos los Niños",
+        icon: ShieldCheck,
+        roles: ["coordinator"],
+        hiddenForMonitorStage: true,
+      },
+      {
+        view: "catechists",
+        label: "Registro Catequistas",
+        icon: Briefcase,
+        roles: ["coordinator"],
+        monitorLabel: "Registro Monitores",
+      },
+      {
+        view: "catechist-attendance",
+        label: "Asistencia Equipo",
+        icon: CheckCircle2,
+        roles: ["coordinator"],
+        monitorLabel: "Asistencia Monitores",
+      },
+      {
+        view: "family-contact",
+        label: "Contactar familias",
+        icon: Send,
+        roles: ["coordinator"],
+        hiddenForMonitorStage: true,
+      },
       { view: "family-inbox", label: "Correo", icon: Inbox, roles: ["coordinator"] },
-      { view: "group-history", label: "Histórico Grupos", icon: CalendarDays, roles: ["coordinator"] },
-      { view: "coordinator-edit-groups", label: "Editar Grupos", icon: Settings, roles: ["coordinator"] },
-      { view: "class-days", label: "Gestión de calendario", icon: CalendarDays, roles: ["coordinator"] },
-      { view: "agenda", label: "Gestión Agenda", icon: Calendar, roles: ["coordinator"] },
+      {
+        view: "group-history",
+        label: "Histórico Grupos",
+        icon: CalendarDays,
+        roles: ["coordinator"],
+        hiddenForMonitorStage: true,
+      },
+      {
+        view: "coordinator-edit-groups",
+        label: "Editar Grupos",
+        icon: Settings,
+        roles: ["coordinator"],
+        hiddenForMonitorStage: true,
+      },
+      {
+        view: "class-days",
+        label: "Gestión de calendario",
+        icon: CalendarDays,
+        roles: ["coordinator"],
+        monitorLabel: "Gestión de actividades",
+      },
+      {
+        view: "agenda",
+        label: "Gestión Agenda",
+        icon: Calendar,
+        roles: ["coordinator"],
+        monitorLabel: "Gestión de Reuniones",
+      },
     ],
   },
   {
@@ -94,6 +162,8 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     id: "analysis",
     label: "Análisis",
     accent: "default",
+    // Los informes con IA son de niños y de catequistas.
+    hiddenForMonitorStage: true,
     items: [
       { view: "reports", label: "Informes IA", icon: Mail },
     ],
@@ -104,7 +174,43 @@ export const NAVIGATION_SECTIONS: NavigationSection[] = [
     accent: "default",
     items: [
       { view: "account", label: "Seguridad", icon: Key },
-      { view: "my-account", label: "Cuenta", icon: User },
+      { view: "my-account", label: "Cuenta", icon: UserIcon },
     ],
   },
 ];
+
+/**
+ * El menú de un usuario concreto. Para los de comunión y postcomunión se
+ * quitan las secciones y entradas que van de grupos y niños, y las que se
+ * quedan cambian de nombre: lo que gestionan son monitores, días de actividad
+ * y reuniones.
+ */
+export const getNavigationSections = (user: User): NavigationSection[] => {
+  const isMonitorUser = isMonitorStageUser(user);
+  const isGlobal = isGlobalCoordinator(user);
+
+  return NAVIGATION_SECTIONS.filter(
+    (section) => !(isMonitorUser && section.hiddenForMonitorStage)
+  )
+    .map((section) => ({
+      ...section,
+      items: section.items
+        .filter((item) => {
+          if (item.globalCoordinatorOnly && !isGlobal) return false;
+          if (isMonitorUser && item.hiddenForMonitorStage) return false;
+          if (!item.roles) return true;
+          return item.roles.includes(user.role);
+        })
+        .map((item) => ({
+          ...item,
+          label: isMonitorUser && item.monitorLabel ? item.monitorLabel : item.label,
+        })),
+    }))
+    .filter((section) => section.items.length > 0);
+};
+
+/** ¿Puede este usuario abrir esta pantalla? Se usa al volver del menú. */
+export const canSeeView = (user: User, view: View): boolean =>
+  getNavigationSections(user).some((section) =>
+    section.items.some((item) => item.view === view)
+  );

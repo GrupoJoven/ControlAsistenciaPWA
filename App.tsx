@@ -26,6 +26,9 @@ import {
   loadClassDays,
   loadStudents,
   loadAttendance,
+  loadMonitors,
+  loadMonitorActivityDays,
+  loadMonitorAttendance,
 
 } from "./src/app/loaders";
 
@@ -42,15 +45,27 @@ import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, Atten
 import {
   EventGrade,
   EventStage,
+  MONITOR_STAGES,
+  MonitorStage,
+  STAGE_LABELS,
   Stage,
   getEventsForUser,
+  getMonitorStage,
   getUserStageGrades,
   getUserStages,
   getVisibleEvents,
   isGlobalCoordinator,
+  isMonitorStage,
   toCountsForAttendance,
   toEventGrade,
 } from './src/utils/stages';
+import {
+  Monitor,
+  MonitorSlot,
+  getMeetingsForStage,
+  getMonitorStageConfig,
+} from './src/utils/monitors';
+import { canSeeView } from './src/app/navigation';
 import Dashboard from './components/Dashboard';
 import AttendanceTracker from './components/AttendanceTracker';
 import Historial from './components/Historial';
@@ -74,6 +89,10 @@ import AccountSettings from './components/AccountSettings';
 import MyAccount from './components/MyAccount';
 import Drive from './components/Drive';
 import AgendaManager from './components/AgendaManager';
+import MonitorManager, { type NewMonitorInput } from './components/MonitorManager';
+import MonitorAttendance from './components/MonitorAttendance';
+import MonitorDashboard from './components/MonitorDashboard';
+import type { NewCoordinatorInput } from './components/StageCoordinatorsManager';
 import AppSidebar from "./components/layout/AppSidebar";
 import AppHeader from "./components/layout/AppHeader";
 
@@ -106,6 +125,21 @@ const App: React.FC = () => {
   const [classDays, setClassDays] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [incidentUsers, setIncidentUsers] = useState<User[]>([]);
+
+  // Monitores de comunión y postcomunión. RLS solo los devuelve a sus
+  // coordinadores y al general, así que para el resto quedan vacíos.
+  const [monitors, setMonitors] = useState<Monitor[]>([]);
+  const [monitorActivityDays, setMonitorActivityDays] = useState<Record<MonitorStage, string[]>>({
+    communion: [],
+    postcommunion: [],
+  });
+  /**
+   * A qué equipo está mirando el coordinador general en las pantallas que
+   * comparten catequistas y monitores (registro, asistencia y calendario).
+   * Los coordinadores de comunión y postcomunión no lo usan: solo tienen el
+   * suyo.
+   */
+  const [teamTab, setTeamTab] = useState<"catechists" | MonitorStage>("catechists");
   const [searchQuery, setSearchQuery] = useState('');
   // Correo que "Email Padres" (Todos los Niños) deja preparado para Correo.
   const [mailDraft, setMailDraft] = useState<MailDraft | null>(null);
@@ -491,6 +525,25 @@ const App: React.FC = () => {
 
     setClassDays(classDaysMapped);
 
+    // --- monitores de comunión y postcomunión ---
+    const monitorsMapped = await loadMonitors();
+
+    setMonitorActivityDays(await loadMonitorActivityDays());
+
+    try {
+      const monitorAttendance = await loadMonitorAttendance();
+
+      setMonitors(
+        monitorsMapped.map((monitor) => ({
+          ...monitor,
+          attendanceHistory: monitorAttendance.get(monitor.id) ?? [],
+        }))
+      );
+    } catch (error) {
+      console.warn("No se pudo cargar la asistencia de los monitores", error);
+      setMonitors(monitorsMapped);
+    }
+
     // --- catechist_attendance + users final ---
     let usersWithAttendance: User[] = [];
 
@@ -593,6 +646,8 @@ const App: React.FC = () => {
     setIncidentUsers([]);
     setEvents([]);
     setClassDays([]);
+    setMonitors([]);
+    setMonitorActivityDays({ communion: [], postcommunion: [] });
     setBaseDataLoaded(false);
     setTodayBirthdays([]);
     setShowBirthdayPopup(false);
@@ -613,6 +668,14 @@ const App: React.FC = () => {
 
   const isSearchView = ['students', 'coordinator-groups', 'catechists'].includes(currentView);
 
+  // Si el usuario cambia de papel (o entra uno de comunión/postcomunión con
+  // una pantalla guardada que ya no le corresponde), se vuelve al resumen en
+  // vez de dejar la pantalla en blanco.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!canSeeView(currentUser, currentView)) setCurrentView('dashboard');
+  }, [currentUser, currentView]);
+
   // --- Curso académico -------------------------------------------------------
   // El curso va del 1 de septiembre al 31 de agosto. Se ofrecen en el selector
   // los cursos que tengan algún registro, más el actual aunque esté vacío.
@@ -625,8 +688,16 @@ const App: React.FC = () => {
   // fuera a propósito: una entrada con fecha lejana haría aparecer un curso
   // entero en el selector sin que exista un solo registro de asistencia.
   const availableAcademicYears = useMemo(
-    () => listAcademicYears(classDays, attendanceDates),
-    [classDays, attendanceDates]
+    () =>
+      listAcademicYears(
+        classDays,
+        attendanceDates,
+        // Los días de actividad de los monitores: para su coordinador son los
+        // únicos registros que hay, así que sin ellos el selector de curso se
+        // quedaría solo con el actual.
+        MONITOR_STAGES.flatMap((stage) => monitorActivityDays[stage] ?? [])
+      ),
+    [classDays, attendanceDates, monitorActivityDays]
   );
 
   const selectedAcademicYear = useMemo(
@@ -1137,6 +1208,43 @@ const App: React.FC = () => {
       );
     setUsers(apply);
     setIncidentUsers(apply);
+
+    // En comunión y postcomunión al coordinador se le pasa lista como a un
+    // monitor más, así que necesita su ficha. Al quitarlo la ficha se queda
+    // (con su historial), pero ya solo como monitor.
+    if (isMonitorStage(stage)) {
+      const profile = users.find(u => u.id === userId);
+
+      if (assign) {
+        await ensureCoordinatorMonitorRow(
+          {
+            id: userId,
+            name: profile?.name ?? "",
+            email: profile?.email ?? "",
+            birthDate: profile?.birthDate ?? "",
+          },
+          stage
+        );
+      } else {
+        const own = monitors.find(m => m.profileId === userId);
+
+        if (own) {
+          const { error: roleErr } = await supabase
+            .from("monitors")
+            .update({ role: "monitor" })
+            .eq("id", own.id);
+
+          if (roleErr) {
+            console.warn("No se pudo quitar el rol de coordinador de la ficha de monitor", roleErr);
+          } else {
+            setMonitors(prev =>
+              prev.map(m => (m.id === own.id ? { ...m, role: "monitor" } : m))
+            );
+          }
+        }
+      }
+    }
+
     return true;
   };
 
@@ -1336,6 +1444,82 @@ const App: React.FC = () => {
   );
 
   const isGlobal = isGlobalCoordinator(currentUser);
+
+  // --- Monitores -------------------------------------------------------------
+  // Etapa de monitores del usuario, si es coordinador de comunión o de
+  // postcomunión. El general no tiene una suya: elige con las pestañas.
+  const myMonitorStage = getMonitorStage(currentUser);
+  const isMonitorUser = myMonitorStage !== null;
+  const activeMonitorStage: MonitorStage =
+    myMonitorStage ?? (teamTab === "catechists" ? "communion" : teamTab);
+  const activeMonitorConfig = getMonitorStageConfig(activeMonitorStage);
+
+  /**
+   * ¿Las pantallas compartidas muestran monitores? Para un coordinador de
+   * comunión o postcomunión, siempre; para el general, cuando ha elegido una
+   * de esas pestañas.
+   */
+  const showMonitorTeam = isMonitorUser || (isGlobal && teamTab !== "catechists");
+
+  /**
+   * Pestañas para el coordinador general: el equipo de catequesis y los dos de
+   * monitores comparten pantalla (registro, asistencia y calendario).
+   */
+  const teamTabs = isGlobal ? (
+    <div className="flex flex-wrap gap-2 mb-6">
+      {(
+        [
+          { key: "catechists" as const, label: "Catequistas" },
+          ...MONITOR_STAGES.map((stage) => ({
+            key: stage,
+            label: `Monitores de ${STAGE_LABELS[stage].toLowerCase()}`,
+          })),
+        ]
+      ).map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => setTeamTab(key)}
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+            teamTab === key
+              ? "bg-violet-600 text-white shadow-md"
+              : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  const monitorsOfActiveStage = useMemo(
+    () => monitors.filter((monitor) => monitor.stage === activeMonitorStage),
+    [monitors, activeMonitorStage]
+  );
+
+  // A quien ya ha dejado el equipo no se le pasa lista ni cuenta en el resumen,
+  // pero sigue en el registro con su historial.
+  const activeMonitorsOfStage = useMemo(
+    () => monitorsOfActiveStage.filter((monitor) => monitor.active),
+    [monitorsOfActiveStage]
+  );
+
+  const activeMonitorActivityDays = useMemo(
+    () => monitorActivityDays[activeMonitorStage] ?? [],
+    [monitorActivityDays, activeMonitorStage]
+  );
+
+  const academicYearMonitorActivityDays = useMemo(
+    () => filterDatesByAcademicYear(activeMonitorActivityDays, selectedAcademicYear),
+    [activeMonitorActivityDays, selectedAcademicYear]
+  );
+
+  /** Las reuniones de la etapa activa, del curso seleccionado. */
+  const academicYearMeetings = useMemo(
+    () =>
+      getMeetingsForStage(academicYearEvents, activeMonitorStage),
+    [academicYearEvents, activeMonitorStage]
+  );
 
 
   const addEvent = async (event: {
@@ -1762,6 +1946,584 @@ const App: React.FC = () => {
   };
 
 
+  // --- Monitores de comunión y postcomunión ----------------------------------
+
+  /**
+   * Calendario de actividades de una etapa de monitores. Es el equivalente de
+   * toggleClassDay, pero cada etapa lleva el suyo: comunión y postcomunión son
+   * independientes entre ellas y de la catequesis.
+   */
+  const toggleMonitorActivityDay = async (stage: MonitorStage, date: string) => {
+    if (blockIfOffline("modificar el calendario de actividades")) return;
+
+    const exists = (monitorActivityDays[stage] ?? []).includes(date);
+
+    if (!exists) {
+      const { error } = await supabase
+        .from("monitor_activity_days")
+        .insert({ stage, date });
+
+      if (error) {
+        alert("Error al añadir el día de actividad: " + error.message);
+        return;
+      }
+
+      setMonitorActivityDays(prev => ({
+        ...prev,
+        [stage]: [...(prev[stage] ?? []), date].sort(),
+      }));
+      return;
+    }
+
+    const { error } = await supabase
+      .from("monitor_activity_days")
+      .delete()
+      .eq("stage", stage)
+      .eq("date", date);
+
+    if (error) {
+      alert("Error al quitar el día de actividad: " + error.message);
+      return;
+    }
+
+    setMonitorActivityDays(prev => ({
+      ...prev,
+      [stage]: (prev[stage] ?? []).filter(d => d !== date),
+    }));
+  };
+
+  /**
+   * Pasar lista a un monitor. Mismo planteamiento que
+   * updateCatechistAttendance: las casillas del día se guardan sin pisar la
+   * otra, y las reuniones van con la fecha del evento.
+   */
+  const updateMonitorAttendance = async (
+    monitorId: string,
+    type: "activity" | "event",
+    status: AttendanceStatus,
+    refId?: string,
+    slot?: MonitorSlot,
+    date?: string
+  ) => {
+    if (blockIfOffline("guardar la asistencia del monitor")) return;
+
+    const today = getTodayStr();
+
+    try {
+      if (type === "activity") {
+        if (!slot) return;
+
+        const activityDate = date ?? today;
+
+        const { data: current, error: readErr } = await supabase
+          .from("monitor_attendance")
+          .select("activity, mass")
+          .eq("monitor_id", monitorId)
+          .eq("date", activityDate)
+          .maybeSingle();
+
+        if (readErr) throw readErr;
+
+        // Comunión no tiene misa: su columna mass se queda a null.
+        const monitorStage = monitors.find(m => m.id === monitorId)?.stage ?? activeMonitorStage;
+        const hasMass = getMonitorStageConfig(monitorStage).slots.includes("mass");
+
+        const next = {
+          monitor_id: monitorId,
+          date: activityDate,
+          activity: slot === "activity" ? status : (current?.activity ?? "absent"),
+          mass: hasMass
+            ? (slot === "mass" ? status : (current?.mass ?? "absent"))
+            : null,
+        };
+
+        const { error } = await supabase
+          .from("monitor_attendance")
+          .upsert(next, { onConflict: "monitor_id,date" });
+
+        if (error) throw error;
+
+        setMonitors(prev =>
+          prev.map(monitor => {
+            if (monitor.id !== monitorId) return monitor;
+
+            const history = (monitor.attendanceHistory ?? []).filter(
+              h => !(h.type === "activity" && h.date === activityDate)
+            );
+
+            history.push({
+              type: "activity",
+              date: activityDate,
+              activity: next.activity as AttendanceStatus,
+              mass: (next.mass ?? "absent") as AttendanceStatus,
+            });
+
+            return { ...monitor, attendanceHistory: history };
+          })
+        );
+
+        return;
+      }
+
+      if (!refId) return;
+
+      // La fecha del evento, solo el día: monitor_attendance_events.date es un
+      // date y forma parte de la clave.
+      const eventDate = String(events.find(e => e.id === refId)?.date ?? today).slice(0, 10);
+
+      const payload = {
+        monitor_id: monitorId,
+        event_id: refId,
+        date: eventDate,
+        status,
+      };
+
+      const { error } = await supabase
+        .from("monitor_attendance_events")
+        .upsert(payload, { onConflict: "monitor_id,event_id,date" });
+
+      if (error) throw error;
+
+      setMonitors(prev =>
+        prev.map(monitor => {
+          if (monitor.id !== monitorId) return monitor;
+
+          const history = (monitor.attendanceHistory ?? []).filter(
+            h => !(h.type === "event" && h.refId === refId)
+          );
+
+          history.push({ type: "event", refId, date: eventDate, status });
+
+          return { ...monitor, attendanceHistory: history };
+        })
+      );
+    } catch (e: any) {
+      alert("Error guardando la asistencia del monitor: " + (e?.message ?? String(e)));
+    }
+  };
+
+  const addMonitor = async (input: NewMonitorInput): Promise<boolean> => {
+    if (blockIfOffline("añadir el monitor")) return false;
+
+    const { data, error } = await supabase
+      .from("monitors")
+      .insert({
+        stage: input.stage,
+        name: input.name,
+        email: input.email || null,
+        phone: input.phone || null,
+        birth_date: input.birthDate || null,
+        notes: input.notes || null,
+      })
+      .select("id, stage, name, email, phone, birth_date, photo_path, role, active, profile_id, notes")
+      .single();
+
+    if (error) {
+      alert("Error al añadir el monitor: " + error.message);
+      return false;
+    }
+
+    setMonitors(prev => [
+      ...prev,
+      {
+        id: data.id,
+        stage: data.stage as MonitorStage,
+        name: data.name ?? "",
+        email: data.email ?? "",
+        phone: data.phone ?? "",
+        birthDate: data.birth_date ? String(data.birth_date).slice(0, 10) : "",
+        photoPath: data.photo_path ?? null,
+        photo: "",
+        role: (data.role as Monitor["role"]) ?? "monitor",
+        active: data.active !== false,
+        profileId: data.profile_id ?? null,
+        notes: data.notes ?? "",
+        attendanceHistory: [],
+      },
+    ]);
+
+    return true;
+  };
+
+  const updateMonitor = async (monitor: Monitor): Promise<boolean> => {
+    if (blockIfOffline("guardar el monitor")) return false;
+
+    const { error } = await supabase
+      .from("monitors")
+      .update({
+        stage: monitor.stage,
+        name: monitor.name,
+        email: monitor.email || null,
+        phone: monitor.phone || null,
+        birth_date: monitor.birthDate || null,
+        notes: monitor.notes || null,
+        active: monitor.active,
+      })
+      .eq("id", monitor.id);
+
+    if (error) {
+      alert("Error al guardar el monitor: " + error.message);
+      return false;
+    }
+
+    setMonitors(prev => prev.map(m => (m.id === monitor.id ? { ...m, ...monitor } : m)));
+    return true;
+  };
+
+  const removeMonitor = async (monitorId: string): Promise<boolean> => {
+    if (blockIfOffline("eliminar el monitor")) return false;
+
+    const { error } = await supabase.from("monitors").delete().eq("id", monitorId);
+
+    if (error) {
+      alert("Error al eliminar el monitor: " + error.message);
+      return false;
+    }
+
+    setMonitors(prev => prev.filter(m => m.id !== monitorId));
+    return true;
+  };
+
+  const changeMonitorPhoto = async (monitorId: string, file: File | null) => {
+    if (blockIfOffline("cambiar la foto del monitor")) return;
+
+    if (!file) {
+      const { error } = await supabase
+        .from("monitors")
+        .update({ photo_path: null })
+        .eq("id", monitorId);
+
+      if (error) {
+        alert("Error al quitar la foto: " + error.message);
+        return;
+      }
+
+      setMonitors(prev =>
+        prev.map(m => (m.id === monitorId ? { ...m, photo: "", photoPath: null } : m))
+      );
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      alert("El archivo debe ser una imagen.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("La imagen no puede superar 2MB.");
+      return;
+    }
+
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `monitors/${monitorId}/avatar.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from("media")
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (upErr) {
+      alert("Error subiendo la imagen: " + upErr.message);
+      return;
+    }
+
+    const { error: dbErr } = await supabase
+      .from("monitors")
+      .update({ photo_path: path })
+      .eq("id", monitorId);
+
+    if (dbErr) {
+      alert("Imagen subida, pero no se pudo guardar en la ficha: " + dbErr.message);
+      return;
+    }
+
+    const preview = URL.createObjectURL(file);
+
+    setMonitors(prev =>
+      prev.map(m => (m.id === monitorId ? { ...m, photo: preview, photoPath: path } : m))
+    );
+  };
+
+  /** Apunta la ficha de monitor al perfil que acaba de tener acceso. */
+  const linkMonitorProfile = async (
+    monitorId: string,
+    profileId: string,
+    email: string
+  ): Promise<boolean> => {
+    const { error } = await supabase
+      .from("monitors")
+      .update({ profile_id: profileId, email })
+      .eq("id", monitorId);
+
+    if (error) {
+      alert(
+        "El usuario existe, pero no se ha podido vincular con la ficha del monitor: " +
+          error.message +
+          "\n\nVuelve a intentarlo con el mismo correo: se reconocerá el usuario ya creado."
+      );
+      return false;
+    }
+
+    setMonitors(prev =>
+      prev.map(m => (m.id === monitorId ? { ...m, profileId, email } : m))
+    );
+
+    return true;
+  };
+
+  /**
+   * Darle acceso a la app a un monitor: le crea el usuario con los datos que
+   * ya tiene su ficha y los vincula por monitors.profile_id, así que no pierde
+   * su historial de asistencia.
+   *
+   * El perfil nuevo es un 'catechist' de su etapa de monitores, que es lo que
+   * la app entiende por "monitor con acceso": ve el resumen, el calendario de
+   * actividades y sus reuniones, pero no coordina nada.
+   */
+  const promoteMonitorToUser = async (
+    monitorId: string,
+    input: { email: string; password: string }
+  ): Promise<boolean> => {
+    if (blockIfOffline("dar acceso al monitor")) return false;
+
+    const monitor = monitors.find(m => m.id === monitorId);
+
+    if (!monitor) {
+      alert("No se ha encontrado el monitor.");
+      return false;
+    }
+
+    if (monitor.profileId) {
+      alert("Este monitor ya tiene usuario de la app.");
+      return false;
+    }
+
+    const email = input.email.trim().toLowerCase();
+
+    if (!email || input.password.length < 6) {
+      alert("Hace falta un correo y una contraseña de al menos 6 caracteres.");
+      return false;
+    }
+
+    // ¿Hay ya un perfil con ese correo? Pasa si un intento anterior creó el
+    // usuario y se quedó sin vincular. Se reutiliza solo si es de la misma
+    // etapa y no es de otro monitor: así un correo escrito por error no
+    // vincula la ficha con otra persona.
+    const { data: existingRows, error: existingErr } = await supabase
+      .from("profiles")
+      .select("id, name, role, stage")
+      .eq("email", email)
+      .limit(1);
+
+    if (existingErr) {
+      alert("Error comprobando si el correo ya está en uso: " + existingErr.message);
+      return false;
+    }
+
+    const existing = existingRows?.[0];
+
+    if (existing) {
+      if (monitors.some(m => m.profileId === existing.id)) {
+        alert("Ese correo ya es el de otro monitor con acceso a la app.");
+        return false;
+      }
+
+      if (existing.stage !== monitor.stage) {
+        alert(
+          `Ese correo ya lo usa otro usuario de la app (${existing.name || email}). Usa otro correo.`
+        );
+        return false;
+      }
+
+      const linked = await linkMonitorProfile(monitorId, existing.id, email);
+
+      if (linked) {
+        alert(
+          `${monitor.name} ya tenía el usuario creado: se ha vinculado con su ficha. La contraseña es la que se puso entonces; puedes cambiarla con "Restablecer contraseña".`
+        );
+      }
+
+      return linked;
+    }
+
+    const res = await supabase.functions.invoke("create-catechist", {
+      body: {
+        email,
+        password: input.password,
+        name: monitor.name,
+        birth_date: monitor.birthDate || null,
+        group_ids: [],
+        // El coordinador general tiene que decir la etapa; al de la etapa se
+        // le aplica la suya, que es la del monitor.
+        stage: monitor.stage,
+      },
+    });
+
+    if (res.error) {
+      let extra = "";
+      const anyErr: any = res.error;
+
+      if (anyErr?.context instanceof Response) {
+        try {
+          const body = await anyErr.context.clone().json();
+          extra = body?.error ? `: ${body.error}` : "";
+        } catch {
+          extra = "";
+        }
+      }
+
+      alert("Error creando el usuario del monitor" + extra);
+      return false;
+    }
+
+    const newUserId = (res.data as any)?.userId as string | undefined;
+
+    if (!newUserId) {
+      alert("Usuario creado, pero no se ha recibido su id. Vuelve a intentarlo con el mismo correo.");
+      return false;
+    }
+
+    const created: User = {
+      id: newUserId,
+      name: monitor.name,
+      email,
+      role: "catechist",
+      stage: monitor.stage,
+      birthDate: monitor.birthDate || "",
+      attendanceHistory: [],
+    };
+
+    setUsers(prev => [...prev, created]);
+    setIncidentUsers(prev => [...prev, created]);
+
+    return await linkMonitorProfile(monitorId, newUserId, email);
+  };
+
+  /**
+   * Ficha de monitor del coordinador de una etapa de monitores: se le pasa
+   * lista como a los demás, así que necesita la suya. Si ya la tiene (porque
+   * antes era monitor), se reutiliza y conserva su historial.
+   */
+  const ensureCoordinatorMonitorRow = async (user: Pick<User, "id" | "name" | "email" | "birthDate">, stage: MonitorStage) => {
+    const existing = monitors.find(m => m.profileId === user.id);
+
+    if (existing) {
+      const { error } = await supabase
+        .from("monitors")
+        .update({ role: "coordinator", stage, active: true })
+        .eq("id", existing.id);
+
+      if (error) {
+        console.warn("No se pudo marcar la ficha de monitor del coordinador", error);
+        return;
+      }
+
+      setMonitors(prev =>
+        prev.map(m =>
+          m.id === existing.id ? { ...m, role: "coordinator", stage, active: true } : m
+        )
+      );
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("monitors")
+      .insert({
+        stage,
+        name: user.name,
+        email: user.email || null,
+        birth_date: user.birthDate || null,
+        role: "coordinator",
+        profile_id: user.id,
+      })
+      .select("id, stage, name, email, phone, birth_date, photo_path, role, active, profile_id, notes")
+      .single();
+
+    if (error) {
+      console.warn("No se pudo crear la ficha de monitor del coordinador", error);
+      return;
+    }
+
+    setMonitors(prev => [
+      ...prev,
+      {
+        id: data.id,
+        stage: data.stage as MonitorStage,
+        name: data.name ?? "",
+        email: data.email ?? "",
+        phone: data.phone ?? "",
+        birthDate: data.birth_date ? String(data.birth_date).slice(0, 10) : "",
+        photoPath: data.photo_path ?? null,
+        photo: "",
+        role: "coordinator",
+        active: data.active !== false,
+        profileId: data.profile_id ?? null,
+        notes: data.notes ?? "",
+        attendanceHistory: [],
+      },
+    ]);
+  };
+
+  /**
+   * Alta de un coordinador nuevo desde Supercoordinación. Hace falta en
+   * comunión y postcomunión, donde no hay perfiles entre los que elegir.
+   */
+  const createStageCoordinator = async (input: NewCoordinatorInput): Promise<boolean> => {
+    if (blockIfOffline("crear el coordinador")) return false;
+
+    const res = await supabase.functions.invoke("create-catechist", {
+      body: {
+        email: input.email,
+        password: input.password,
+        name: input.name,
+        birth_date: input.birthDate || null,
+        role: "coordinator",
+        stage: input.stage,
+        group_ids: [],
+      },
+    });
+
+    if (res.error) {
+      let extra = "";
+      const anyErr: any = res.error;
+
+      if (anyErr?.context instanceof Response) {
+        try {
+          const body = await anyErr.context.clone().json();
+          extra = body?.error ? `: ${body.error}` : "";
+        } catch {
+          extra = "";
+        }
+      }
+
+      alert("Error al crear el coordinador" + extra);
+      return false;
+    }
+
+    const newUserId = (res.data as any)?.userId as string | undefined;
+
+    if (newUserId) {
+      const created: User = {
+        id: newUserId,
+        name: input.name,
+        email: input.email,
+        role: "coordinator",
+        stage: input.stage,
+        birthDate: input.birthDate || "",
+        attendanceHistory: [],
+      };
+
+      setUsers(prev => [...prev, created]);
+      setIncidentUsers(prev => [...prev, created]);
+
+      if (isMonitorStage(input.stage)) {
+        await ensureCoordinatorMonitorRow(created, input.stage);
+      }
+    }
+
+    return true;
+  };
+
+
   const myCatecumenos = useMemo(
     () => getMyCatecumenos(students, activeGroupId, searchQuery).sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" })),
     [students, activeGroupId, searchQuery]
@@ -1900,6 +2662,7 @@ const App: React.FC = () => {
           selectedAcademicYear={selectedAcademicYear}
           onChangeAcademicYear={setSelectedAcademicYearKey}
           isCurrentAcademicYear={isCurrentAcademicYear}
+          currentUser={currentUserWithStages ?? currentUser}
         />
         {showPushBanner && (
           <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900 shadow-sm">
@@ -1981,7 +2744,23 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {currentView === 'dashboard' && <Dashboard students={students} events={myEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />}
+          {currentView === 'dashboard' && (
+            isMonitorUser ? (
+              <MonitorDashboard
+                stage={activeMonitorStage}
+                monitors={activeMonitorsOfStage}
+                activityDays={academicYearMonitorActivityDays}
+                events={myEvents}
+                academicYear={selectedAcademicYear}
+                onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined}
+                // Un monitor con usuario de la app no coordina: RLS solo le
+                // devuelve su ficha, así que el panel habla de él.
+                personal={currentUser.role !== 'coordinator'}
+              />
+            ) : (
+              <Dashboard students={students} events={myEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />
+            )
+          )}
           {currentView === 'attendance' && (
             <AttendanceTracker
               students={myCatecumenos}
@@ -2022,7 +2801,8 @@ const App: React.FC = () => {
             />
           )}
           {currentView === 'school-calendar' && (
-            <SchoolCalendar classDays={classDays} />
+            // Comunión y postcomunión no tienen días lectivos: ven el suyo.
+            <SchoolCalendar classDays={isMonitorUser ? activeMonitorActivityDays : classDays} />
           )}
           {currentView === 'drive' && (
             <Drive
@@ -2097,24 +2877,71 @@ const App: React.FC = () => {
           )}
 
           {currentView === 'catechists' && currentUser.role === 'coordinator' && (
-            <CatechistManager
-              users={usersWithStages}
-              filteredUsers={filteredUsers}
-              onAddUser={(u) => addUser(u)}
-              onRemoveUser={(id) => { void removeUser(id); }}
-              onUpdateUser={updateUser}
-              onSetUserGroups={(uid, gids) => setUserGroups(uid, gids)}
-              getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
-              groups={groups}
-              classDays={classDays}
-              events={visibleEvents}
-              academicYear={selectedAcademicYear}
-              onResetPassword={(uid, pw) => resetPassword(uid, pw)}
-              isOnline={isOnline}
-            />
+            <>
+              {teamTabs}
+              {showMonitorTeam ? (
+                <MonitorManager
+                  stage={activeMonitorStage}
+                  monitors={monitorsOfActiveStage}
+                  activityDays={academicYearMonitorActivityDays}
+                  events={academicYearEvents}
+                  academicYear={selectedAcademicYear}
+                  searchQuery={searchQuery}
+                  canMoveStage={isGlobal}
+                  isOnline={isOnline}
+                  onAdd={addMonitor}
+                  onUpdate={updateMonitor}
+                  onRemove={removeMonitor}
+                  onPhotoChange={changeMonitorPhoto}
+                  onPromote={promoteMonitorToUser}
+                  onResetPassword={resetPassword}
+                />
+              ) : (
+                <CatechistManager
+                  users={usersWithStages}
+                  filteredUsers={filteredUsers}
+                  onAddUser={(u) => addUser(u)}
+                  onRemoveUser={(id) => { void removeUser(id); }}
+                  onUpdateUser={updateUser}
+                  onSetUserGroups={(uid, gids) => setUserGroups(uid, gids)}
+                  getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
+                  groups={groups}
+                  classDays={classDays}
+                  events={visibleEvents}
+                  academicYear={selectedAcademicYear}
+                  onResetPassword={(uid, pw) => resetPassword(uid, pw)}
+                  isOnline={isOnline}
+                />
+              )}
+            </>
           )}
 
-          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && <CatechistAttendance users={usersWithStages.filter(u => u.role === 'catechist' || u.role === 'coordinator')} events={academicYearEvents} classDays={academicYearClassDays} onUpdate={updateCatechistAttendance} />}
+          {currentView === 'catechist-attendance' && currentUser.role === 'coordinator' && (
+            <>
+              {teamTabs}
+              {showMonitorTeam ? (
+                <MonitorAttendance
+                  stage={activeMonitorStage}
+                  monitors={activeMonitorsOfStage}
+                  activityDays={academicYearMonitorActivityDays}
+                  meetings={academicYearMeetings}
+                  onUpdate={updateMonitorAttendance}
+                />
+              ) : (
+                <CatechistAttendance
+                  // Los perfiles de comunión y postcomunión quedan fuera: se
+                  // les pasa lista como monitores, en su propia pestaña, y aquí
+                  // se les apuntarían faltas de días lectivos que no son suyos.
+                  users={usersWithStages.filter(
+                    u => (u.role === 'catechist' || u.role === 'coordinator') && !isMonitorStage(u.stage)
+                  )}
+                  events={academicYearEvents}
+                  classDays={academicYearClassDays}
+                  onUpdate={updateCatechistAttendance}
+                />
+              )}
+            </>
+          )}
           {currentView === 'family-contact' && currentUser.role === 'coordinator' && (
             <FamilyContact
               currentUser={currentUser}
@@ -2170,6 +2997,7 @@ const App: React.FC = () => {
               getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
               isOnline={isOnline}
               onSetCoordinator={setStageCoordinator}
+              onCreateCoordinator={createStageCoordinator}
             />
           )}
           {currentView === 'coordinator-edit-groups' && (
@@ -2191,11 +3019,29 @@ const App: React.FC = () => {
           )}
 
           {currentView === 'class-days' && currentUser.role === 'coordinator' && (
-            <ClassDayManager
-              classDays={classDays}
-              academicYear={selectedAcademicYear}
-              onToggle={(d) => void toggleClassDay(d)}
-            />
+            <>
+              {teamTabs}
+              {showMonitorTeam ? (
+                <ClassDayManager
+                  classDays={activeMonitorActivityDays}
+                  academicYear={selectedAcademicYear}
+                  onToggle={(d) => void toggleMonitorActivityDay(activeMonitorStage, d)}
+                  labels={{
+                    title: `Calendario de ${activeMonitorConfig.label.toLowerCase()}`,
+                    subtitle: `Marca los ${activeMonitorConfig.dayLabelPlural} del curso.`,
+                    badge: 'ACTIVIDAD',
+                    day: activeMonitorConfig.dayLabel,
+                    days: activeMonitorConfig.dayLabelPlural,
+                  }}
+                />
+              ) : (
+                <ClassDayManager
+                  classDays={classDays}
+                  academicYear={selectedAcademicYear}
+                  onToggle={(d) => void toggleClassDay(d)}
+                />
+              )}
+            </>
           )}
           {currentView === 'agenda' && currentUser.role === 'coordinator' && (
             <AgendaManager

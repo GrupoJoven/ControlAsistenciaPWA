@@ -143,9 +143,14 @@ El coordinador general tiene además, en **Supercoordinación**, las páginas
 *Correo de confirmación*: son la misma página Correo, pero con el buzón de esa
 cuenta (`comunion@`, `postcomunion@`, `preconfirmacion@` o `confirmacion@`),
 igual que la vería su coordinador. Lo que responda o envíe desde ahí sale de esa
-cuenta. Un coordinador de etapa no puede abrir el buzón de la otra. Comunión y
-postcomunión no tienen coordinadores en la app: sus buzones solo se ven desde
-Supercoordinación y no se usan en *Contactar familias*.
+cuenta. Un coordinador de etapa no puede abrir el buzón de la otra.
+
+Los coordinadores de **comunión** y **postcomunión** sí entran en la app (ver
+`supabase/sql/monitors.sql`) y ven su buzón en **Correo**, igual que los de
+preconfirmación y confirmación. Lo que no tienen es *Contactar familias*: esa
+página escribe a las familias de los niños por grupos, y esas etapas no tienen
+grupos ni niños en la app. Sus buzones siguen viéndose también desde
+Supercoordinación.
 
 - **Leído / no leído**: abrir un correo **no lo marca como leído** en Gmail. Para
   eso está el botón *Marcar como leído* (o *Marcar como no leído*) del propio

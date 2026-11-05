@@ -4,13 +4,39 @@ import { ChevronLeft, ChevronRight, CheckCircle2, CalendarDays, AlertTriangle, X
 import { formatDateLocal, getTodayStr } from '../types';
 import { AcademicYear } from '../src/utils/academicYear';
 
+/**
+ * Textos de la pantalla. Por defecto son los del calendario lectivo de la
+ * catequesis; el calendario de actividades de los monitores de comunión y
+ * postcomunión usa el mismo calendario con otras palabras.
+ */
+export interface ClassDayManagerLabels {
+  title: string;
+  subtitle: string;
+  /** Etiqueta del día marcado, en el cuadradito: "LECTIVO", "ACTIVIDAD"... */
+  badge: string;
+  /** "día lectivo" / "día de actividad", en minúscula y singular. */
+  day: string;
+  /** "días lectivos" / "días de actividad". */
+  days: string;
+}
+
+const DEFAULT_LABELS: ClassDayManagerLabels = {
+  title: "Calendario Escolar",
+  subtitle: "Marca los días lectivos del curso.",
+  badge: "LECTIVO",
+  day: "día lectivo",
+  days: "días lectivos",
+};
+
 interface ClassDayManagerProps {
   classDays: string[];
   academicYear: AcademicYear;
   onToggle: (date: string) => void;
+  labels?: Partial<ClassDayManagerLabels>;
 }
 
-const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYear, onToggle }) => {
+const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYear, onToggle, labels }) => {
+  const text: ClassDayManagerLabels = { ...DEFAULT_LABELS, ...labels };
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -84,8 +110,8 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYe
               <CalendarDays size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Calendario Escolar</h2>
-              <p className="text-slate-500 text-xs sm:text-sm">Marca los días lectivos del curso.</p>
+              <h2 className="text-xl font-bold text-slate-900">{text.title}</h2>
+              <p className="text-slate-500 text-xs sm:text-sm">{text.subtitle}</p>
             </div>
           </div>
           
@@ -139,7 +165,7 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYe
                 {isSelected && (
                   <div className="flex flex-col items-center animate-in zoom-in duration-300">
                     <CheckCircle2 size={12} className="text-indigo-600 sm:w-[16px] sm:h-[16px]" />
-                    <span className="hidden sm:block text-[8px] font-bold text-indigo-500 uppercase tracking-tighter mt-1">LECTIVO</span>
+                    <span className="hidden sm:block text-[8px] font-bold text-indigo-500 uppercase tracking-tighter mt-1">{text.badge}</span>
                   </div>
                 )}
                 
@@ -155,7 +181,7 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYe
             Resumen del Curso Pastoral
           </h4>
           <p className="text-xs sm:text-sm text-indigo-700 leading-relaxed">
-            Has marcado un total de <strong>{currentAcademicYearDaysCount} días lectivos</strong> para el {academicYear.label}.
+            Has marcado un total de <strong>{currentAcademicYearDaysCount} {text.days}</strong> para el {academicYear.label}.
           </p>
         </div>
       </div>
@@ -168,12 +194,12 @@ const ClassDayManager: React.FC<ClassDayManagerProps> = ({ classDays, academicYe
                 <AlertTriangle size={32} />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Quitar día lectivo</h3>
+                <h3 className="text-xl font-bold text-slate-900">Quitar {text.day}</h3>
                 <p className="text-sm text-slate-500 font-medium">{new Date(dateToConfirm).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
               </div>
             </div>
             <p className="text-slate-600 text-sm leading-relaxed">
-              ¿Estás seguro de que deseas desmarcar este día como lectivo?
+              ¿Estás seguro de que deseas desmarcar este {text.day}?
             </p>
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <button 

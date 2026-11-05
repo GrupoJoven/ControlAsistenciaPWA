@@ -12,8 +12,24 @@ import {
   X,
 } from "lucide-react";
 import { Group, User } from "../types";
-import { ALL_STAGES, STAGE_LABELS, Stage, isGlobalCoordinator } from "../src/utils/stages";
+import {
+  ALL_STAGES,
+  CATECHESIS_STAGES,
+  MONITOR_STAGES,
+  STAGE_LABELS,
+  Stage,
+  isGlobalCoordinator,
+  isMonitorStage,
+} from "../src/utils/stages";
 import { FAMILY_EMAIL_SENDERS } from "./FamilyContact";
+
+export interface NewCoordinatorInput {
+  stage: Stage;
+  name: string;
+  email: string;
+  password: string;
+  birthDate: string;
+}
 
 interface StageCoordinatorsManagerProps {
   /** Todos los perfiles, con sus etapas calculadas (usersWithStages). */
@@ -23,11 +39,24 @@ interface StageCoordinatorsManagerProps {
   isOnline: boolean;
   /** Hace (assign) o deja de hacer a un perfil coordinador de la etapa. Devuelve si se ha guardado. */
   onSetCoordinator: (userId: string, stage: Stage, assign: boolean) => Promise<boolean>;
+  /**
+   * Crea un perfil nuevo que ya entra como coordinador de la etapa. Hace falta
+   * en comunión y postcomunión, donde no hay catequistas entre los que elegir:
+   * sus monitores no tienen usuario de la app.
+   */
+  onCreateCoordinator: (input: NewCoordinatorInput) => Promise<boolean>;
 }
 
 type PendingChange = { user: User; stage: Stage; assign: boolean };
 
-const otherStage = (stage: Stage): Stage => (stage === "preconfirmation" ? "confirmation" : "preconfirmation");
+/**
+ * La otra etapa de la misma familia: la otra de catequesis, o la otra de
+ * monitores. Se usa solo para ordenar los candidatos.
+ */
+const otherStage = (stage: Stage): Stage => {
+  const family: Stage[] = isMonitorStage(stage) ? MONITOR_STAGES : CATECHESIS_STAGES;
+  return family.find((s) => s !== stage) ?? stage;
+};
 
 const isCoordinatorOf = (user: User, stage: Stage) => user.role === "coordinator" && user.stage === stage;
 
@@ -54,11 +83,24 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
   getUserGroupIds,
   isOnline,
   onSetCoordinator,
+  onCreateCoordinator,
 }) => {
-  const [selectedIds, setSelectedIds] = useState<Record<Stage, string>>({ preconfirmation: "", confirmation: "" });
+  const [selectedIds, setSelectedIds] = useState<Record<Stage, string>>({
+    preconfirmation: "",
+    confirmation: "",
+    communion: "",
+    postcommunion: "",
+  });
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Alta de un coordinador nuevo, solo en las etapas de monitores.
+  const [creatingStage, setCreatingStage] = useState<Stage | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newBirthDate, setNewBirthDate] = useState("");
 
   const groupNameById = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
 
@@ -70,25 +112,67 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
     return result;
   }, [users]);
 
-  /** Quién puede pasar a coordinar la etapa: primero los catequistas que ya están en ella. */
+  /** Quién puede pasar a coordinar la etapa: primero los perfiles que ya están en ella. */
   const candidatesByStage = useMemo(() => {
     const result = {} as Record<Stage, { label: string; users: User[] }[]>;
+
     for (const stage of ALL_STAGES) {
       const catechists = users.filter((u) => u.role === "catechist");
       const inStage = catechists.filter((u) => (u.stages ?? []).includes(stage) || u.stage === stage);
       const inStageIds = new Set(inStage.map((u) => u.id));
 
+      const inStageLabel = isMonitorStage(stage)
+        ? `Perfiles de ${STAGE_LABELS[stage].toLowerCase()}`
+        : `Catequistas de ${STAGE_LABELS[stage].toLowerCase()}`;
+
       result[stage] = [
-        { label: `Catequistas de ${STAGE_LABELS[stage].toLowerCase()}`, users: inStage.sort(byName) },
-        { label: "Otros catequistas", users: catechists.filter((u) => !inStageIds.has(u.id)).sort(byName) },
+        { label: inStageLabel, users: inStage.sort(byName) },
+        { label: "Otros perfiles", users: catechists.filter((u) => !inStageIds.has(u.id)).sort(byName) },
         {
           label: `Coordinadores de ${STAGE_LABELS[otherStage(stage)].toLowerCase()}`,
           users: users.filter((u) => isCoordinatorOf(u, otherStage(stage))).sort(byName),
         },
       ].filter((section) => section.users.length > 0);
     }
+
     return result;
   }, [users]);
+
+  const resetCreateForm = () => {
+    setCreatingStage(null);
+    setNewName("");
+    setNewEmail("");
+    setNewPassword("");
+    setNewBirthDate("");
+  };
+
+  const canCreate = !!newName.trim() && !!newEmail.trim() && newPassword.length >= 6;
+
+  const handleCreate = async () => {
+    if (!creatingStage || !canCreate || isSaving) return;
+
+    setIsSaving(true);
+    setNotice(null);
+
+    try {
+      const ok = await onCreateCoordinator({
+        stage: creatingStage,
+        name: newName.trim(),
+        email: newEmail.trim(),
+        password: newPassword,
+        birthDate: newBirthDate,
+      });
+
+      if (!ok) return;
+
+      setNotice(
+        `${newName.trim()} ya es coordinador de ${STAGE_LABELS[creatingStage].toLowerCase()}.`
+      );
+      resetCreateForm();
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const groupNamesOf = (user: User) =>
     getUserGroupIds(user.id)
@@ -120,7 +204,9 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
       setNotice(
         assign
           ? `${user.name} ya es coordinador de ${label}.`
-          : `${user.name} ya no es coordinador de ${label}: sigue como catequista de ${label}.`
+          : `${user.name} ya no es coordinador de ${label}: sigue en la app como ${
+              isMonitorStage(stage) ? "monitor" : "catequista"
+            } de ${label}.`
       );
       if (assign) setSelectedIds((prev) => ({ ...prev, [stage]: "" }));
       setPending(null);
@@ -146,8 +232,11 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
             <div className="text-slate-600 space-y-3 text-sm">
               <p>
                 <span className="font-semibold text-slate-800">{user.name}</span> pasará a ser coordinador de {label}.
-                Podrá gestionar los grupos, niños y catequistas de {label} y usar el correo{" "}
-                <span className="font-semibold">{FAMILY_EMAIL_SENDERS[stage]}</span>.
+                Podrá gestionar{" "}
+                {isMonitorStage(stage)
+                  ? `los monitores de ${label}, su calendario de actividades y sus reuniones`
+                  : `los grupos, niños y catequistas de ${label}`}{" "}
+                y usar el correo <span className="font-semibold">{FAMILY_EMAIL_SENDERS[stage]}</span>.
               </p>
               {movingFrom && (
                 <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3 flex gap-2">
@@ -162,7 +251,9 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
           ) : (
             <p className="text-slate-600 text-sm">
               <span className="font-semibold text-slate-800">{user.name}</span> dejará de ser coordinador de {label}.
-              Seguirá en la app como catequista de {label}, con los grupos que tenga asignados.
+              {isMonitorStage(stage)
+                ? ` Seguirá entrando en la app como monitor de ${label}, pero sin la coordinación: su ficha y su asistencia se quedan como están.`
+                : ` Seguirá en la app como catequista de ${label}, con los grupos que tenga asignados.`}
             </p>
           )}
 
@@ -206,8 +297,13 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
           <div className="min-w-0 text-sm text-slate-600 space-y-1">
             <p className="font-bold text-slate-800">Quién coordina cada etapa</p>
             <p>
-              Un coordinador de etapa ve y gestiona solo lo de su etapa y usa su correo. Elige entre los perfiles que
-              ya existen; para dar de alta a alguien nuevo, hazlo antes en Registro Catequistas.
+              Un coordinador de etapa ve y gestiona solo lo de su etapa y usa su correo. En preconfirmación y
+              confirmación se elige entre los perfiles que ya existen; para dar de alta a alguien nuevo, hazlo antes en
+              Registro Catequistas.
+            </p>
+            <p>
+              En comunión y postcomunión sus monitores no tienen usuario de la app, así que aquí mismo se puede crear
+              el coordinador desde cero.
             </p>
           </div>
         </div>
@@ -247,7 +343,14 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
               >
                 <div className="p-4 sm:p-6 border-b border-slate-100 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="font-bold text-slate-800">{STAGE_LABELS[stage]}</h3>
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                      {STAGE_LABELS[stage]}
+                      {isMonitorStage(stage) && (
+                        <span className="px-2 py-0.5 rounded-full bg-violet-50 text-[9px] font-bold uppercase tracking-wide text-violet-600">
+                          Monitores
+                        </span>
+                      )}
+                    </h3>
                     <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1 min-w-0">
                       <Mail size={12} className="shrink-0" />
                       <span className="truncate">{FAMILY_EMAIL_SENDERS[stage]}</span>
@@ -332,6 +435,88 @@ const StageCoordinatorsManager: React.FC<StageCoordinatorsManagerProps> = ({
                       >
                         <UserPlus size={16} /> Asignar
                       </button>
+                    </div>
+                  )}
+
+                  {/* En comunión y postcomunión no hay catequistas entre los
+                      que elegir: se crea el coordinador aquí. */}
+                  {isMonitorStage(stage) && (
+                    <div className="pt-2">
+                      {creatingStage === stage ? (
+                        <div className="space-y-2 rounded-xl border border-violet-100 bg-white p-3">
+                          <p className="text-[10px] font-bold text-violet-600 uppercase tracking-widest">
+                            Nuevo coordinador de {STAGE_LABELS[stage].toLowerCase()}
+                          </p>
+
+                          <input
+                            type="text"
+                            placeholder="Nombre y apellidos"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                          />
+                          <input
+                            type="email"
+                            placeholder="Correo de acceso"
+                            autoComplete="off"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            value={newEmail}
+                            onChange={(e) => setNewEmail(e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Contraseña inicial (mínimo 6)"
+                            autoComplete="off"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                          />
+                          <input
+                            type="date"
+                            aria-label="Fecha de nacimiento"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            value={newBirthDate}
+                            onChange={(e) => setNewBirthDate(e.target.value)}
+                          />
+
+                          <div className="flex flex-col-reverse sm:flex-row gap-2">
+                            <button
+                              type="button"
+                              onClick={resetCreateForm}
+                              disabled={isSaving}
+                              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleCreate()}
+                              disabled={!canCreate || !isOnline || isSaving}
+                              className="flex-1 px-3 py-2 rounded-xl bg-violet-600 text-white text-sm font-bold hover:bg-violet-700 flex items-center justify-center gap-2 disabled:bg-slate-200 disabled:text-slate-500"
+                            >
+                              {isSaving && <Loader2 size={14} className="animate-spin" />}
+                              Crear
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-slate-500">
+                            Entrará con ese correo y esa contraseña, y podrá cambiarla luego en Seguridad.
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotice(null);
+                            resetCreateForm();
+                            setCreatingStage(stage);
+                          }}
+                          disabled={!isOnline || isSaving}
+                          className="w-full px-3 py-2 rounded-xl border border-dashed border-violet-200 text-violet-700 text-sm font-bold hover:bg-violet-50 flex items-center justify-center gap-2 disabled:opacity-40"
+                        >
+                          <UserPlus size={16} /> Crear coordinador nuevo
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

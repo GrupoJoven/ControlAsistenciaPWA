@@ -12,7 +12,9 @@ export type OfflineCacheKey =
   | 'classDays'
   | 'parishEvents'
   | 'incidents'
-  | 'schoolNames';
+  | 'schoolNames'
+  | 'monitors'
+  | 'monitorActivityDays';
 
 export interface OfflineCacheRecord<T = unknown> {
   key: string;

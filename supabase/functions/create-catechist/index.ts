@@ -13,7 +13,16 @@ type Body = {
   name: string;
   birth_date?: string | null;
   group_ids?: string[];
+  /**
+   * Solo el coordinador general puede pedirlos. Sirven para dar de alta a un
+   * coordinador de etapa, y hacen falta en comunión y postcomunión, donde no
+   * hay catequistas entre los que elegir: sus monitores no tienen usuario.
+   */
+  role?: string | null;
+  stage?: string | null;
 };
+
+const STAGES = ["preconfirmation", "confirmation", "communion", "postcommunion"];
 
 Deno.serve(async (req) => {
   try {
@@ -79,6 +88,27 @@ Deno.serve(async (req) => {
     const groupIds = Array.isArray(body.group_ids) ? body.group_ids.filter(Boolean) : [];
     const uniqueGroupIds = Array.from(new Set(groupIds));
 
+    // Rol y etapa del perfil nuevo. Solo el coordinador general (callerStage
+    // nulo) los puede elegir; a un coordinador de etapa se le sigue creando un
+    // catequista de SU etapa, pida lo que pida.
+    const isGlobalCaller = callerStage === null;
+
+    const requestedRole = isGlobalCaller && body.role === "coordinator" ? "coordinator" : "catechist";
+
+    const requestedStage = isGlobalCaller
+      ? (typeof body.stage === "string" && STAGES.includes(body.stage) ? body.stage : null)
+      : callerStage;
+
+    if (isGlobalCaller && body.stage && requestedStage === null) {
+      return new Response(JSON.stringify({ error: "Etapa desconocida: " + body.stage }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
+    }
+
+    // Un coordinador de comunión o postcomunión no tiene grupos: en esas
+    // etapas no hay ninguno.
+    if (requestedStage && !["preconfirmation", "confirmation"].includes(requestedStage) && uniqueGroupIds.length > 0) {
+      return new Response(JSON.stringify({ error: "Comunión y postcomunión no tienen grupos." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }, });
+    }
+
     // Los grupos se comprueban con el cliente del caller: RLS solo le deja ver
     // los de su etapa, así que cualquier id que no vuelva es de la otra (o no
     // existe). Se valida ANTES de crear el usuario para no dejarlo a medias.
@@ -108,7 +138,7 @@ Deno.serve(async (req) => {
       email: body.email,
       password: body.password,
       email_confirm: true,
-      user_metadata: { name: body.name, role: "catechist", stage: callerStage },
+      user_metadata: { name: body.name, role: requestedRole, stage: requestedStage },
     });
 
     if (createErr || !created?.user) {
@@ -142,8 +172,8 @@ Deno.serve(async (req) => {
     // Ajusta los campos a tu esquema real. Si no tienes birth_date o email en profiles, quítalos.
     const updatePayload: Record<string, any> = {
       name: body.name,
-      role: "catechist",
-      stage: callerStage,
+      role: requestedRole,
+      stage: requestedStage,
       email: body.email,
       birth_date: body.birth_date ?? null,
     };

@@ -23,7 +23,7 @@ type RequestBody = {
    * Limita el envío a la gente de una etapa (más los coordinadores globales).
    * 'all', vacío o ausente = todo el mundo. Se combina con userIds (AND).
    */
-  stage?: "preconfirmation" | "confirmation" | "all" | null;
+  stage?: "preconfirmation" | "confirmation" | "communion" | "postcommunion" | "all" | null;
   /**
    * Afina el envío a un curso de esa etapa (1 o 2). 0, vacío o ausente = los
    * dos cursos. Solo se tiene en cuenta si hay etapa.
@@ -86,7 +86,10 @@ Deno.serve(async (req) => {
 
     // Filtro por etapa y curso: la BD resuelve a quién le toca (grupos,
     // profiles.stage y coordinadores globales) para no duplicar la regla aquí.
-    const stage = body.stage === "preconfirmation" || body.stage === "confirmation" ? body.stage : null;
+    // Las etapas de monitores entran aquí igual que las de catequesis: si no
+    // se filtrara, una reunión de comunión le llegaría a toda la parroquia.
+    const STAGES_WITH_FILTER = ["preconfirmation", "confirmation", "communion", "postcommunion"];
+    const stage = typeof body.stage === "string" && STAGES_WITH_FILTER.includes(body.stage) ? body.stage : null;
     const grade = Number(body.grade) === 1 || Number(body.grade) === 2 ? Number(body.grade) : 0;
 
     if (stage) {

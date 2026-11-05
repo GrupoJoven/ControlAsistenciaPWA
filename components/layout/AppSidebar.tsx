@@ -1,9 +1,9 @@
 import React from "react";
 import { Church, LogOut, Menu, User as UserIcon, X } from "lucide-react";
-import { NAVIGATION_SECTIONS } from "../../src/app/navigation";
+import { getNavigationSections } from "../../src/app/navigation";
 import { User } from "../../types";
-import { View } from "../../types/app";
-import { getRoleLabel, isGlobalCoordinator } from "../../src/utils/stages";
+import { View } from "../../src/types/app";
+import { getRoleLabel } from "../../src/utils/stages";
 
 interface AppSidebarProps {
   currentUser: User;
@@ -65,12 +65,8 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto pb-6">
-          {NAVIGATION_SECTIONS.map((section) => {
-            const visibleItems = section.items.filter((item) => {
-              if (item.globalCoordinatorOnly && !isGlobalCoordinator(currentUser)) return false;
-              if (!item.roles) return true;
-              return item.roles.includes(currentUser.role);
-            });
+          {getNavigationSections(currentUser).map((section) => {
+            const visibleItems = section.items;
 
             if (visibleItems.length === 0) return null;
 

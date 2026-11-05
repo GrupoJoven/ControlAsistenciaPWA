@@ -7,12 +7,22 @@ import type { GroupCatechistLink } from "../types/app";
  *
  * Estas reglas deben coincidir con las de stages.sql (group_stage() y
  * profile_stages()), event_grades.sql (group_grade() y
- * profile_stage_grades()) y event_invitees.sql (profile_sees_event_row()).
- * Si cambias una, cambia la otra.
+ * profile_stage_grades()), event_invitees.sql (profile_sees_event_row()) y
+ * monitors.sql. Si cambias una, cambia la otra.
  */
-export type Stage = "preconfirmation" | "confirmation";
+export type CatechesisStage = "preconfirmation" | "confirmation";
 
-/** Etapa de un evento: una concreta o las dos. */
+/**
+ * Etapas de monitores: comunión y postcomunión. No tienen grupos, ni niños en
+ * la app, ni cursos; sus monitores viven en la tabla `monitors` y no tienen
+ * usuario (ver src/utils/monitors.ts). Quien entra en la app es su
+ * coordinador: un perfil con role 'coordinator' y esta etapa.
+ */
+export type MonitorStage = "communion" | "postcommunion";
+
+export type Stage = CatechesisStage | MonitorStage;
+
+/** Etapa de un evento: una concreta o las dos de catequesis. */
 export type EventStage = Stage | "all";
 
 /** Curso dentro de una etapa: primero o segundo. */
@@ -24,7 +34,12 @@ export type EventGrade = 0 | Grade;
 /** Etapa y curso concretos, como "preconfirmation:1". */
 export type StageGrade = `${Stage}:${Grade}`;
 
-export const ALL_STAGES: Stage[] = ["preconfirmation", "confirmation"];
+/** Las etapas con grupos, niños y cursos: las que cubre un evento de 'all'. */
+export const CATECHESIS_STAGES: CatechesisStage[] = ["preconfirmation", "confirmation"];
+
+export const MONITOR_STAGES: MonitorStage[] = ["communion", "postcommunion"];
+
+export const ALL_STAGES: Stage[] = [...CATECHESIS_STAGES, ...MONITOR_STAGES];
 
 export const ALL_GRADES: Grade[] = [1, 2];
 
@@ -35,8 +50,40 @@ export const ALL_STAGE_GRADES: StageGrade[] = ALL_STAGES.flatMap((stage) =>
 export const STAGE_LABELS: Record<EventStage, string> = {
   preconfirmation: "Preconfirmación",
   confirmation: "Confirmación",
+  communion: "Comunión",
+  postcommunion: "Postcomunión",
   all: "Ambas etapas",
 };
+
+/**
+ * ¿Es una etapa de monitores (comunión o postcomunión)? Acepta cualquier
+ * cadena porque también se usa con lo que viene de la base de datos.
+ */
+export const isMonitorStage = (
+  stage: string | null | undefined
+): stage is MonitorStage => stage === "communion" || stage === "postcommunion";
+
+export const isCatechesisStage = (
+  stage: string | null | undefined
+): stage is CatechesisStage =>
+  stage === "preconfirmation" || stage === "confirmation";
+
+/**
+ * Etapa de monitores de un usuario, si es de las suyas. Un coordinador de
+ * comunión o de postcomunión no tiene grupos, así que basta con profiles.stage;
+ * el coordinador general devuelve null porque las lleva las dos (y también las
+ * de catequesis).
+ */
+export const getMonitorStage = (user: User | null | undefined): MonitorStage | null =>
+  isMonitorStage(user?.stage) ? user!.stage : null;
+
+/**
+ * ¿Es este usuario de comunión o postcomunión? Si lo es, la app le deja solo
+ * lo de monitores: no tiene grupos ni niños, así que "Mi Grupo" y la parte de
+ * la coordinación que va de niños no le sirven de nada.
+ */
+export const isMonitorStageUser = (user: User | null | undefined): boolean =>
+  getMonitorStage(user) !== null;
 
 export const GRADE_LABELS: Record<EventGrade, string> = {
   0: "Todos los cursos",
@@ -45,7 +92,7 @@ export const GRADE_LABELS: Record<EventGrade, string> = {
 };
 
 /** Misma lógica que public.group_stage(): PRECONFIRMACI antes que CONFIRMACI. */
-export const getGroupStage = (name: string | null | undefined): Stage | null => {
+export const getGroupStage = (name: string | null | undefined): CatechesisStage | null => {
   const upper = (name ?? "").toUpperCase();
   if (upper.includes("PRECONFIRMACI")) return "preconfirmation";
   if (upper.includes("CONFIRMACI")) return "confirmation";
@@ -181,16 +228,18 @@ export const eventAppliesToStageGrades = (
   const { stage: eventStage, grade } = event;
 
   // Un evento para todos los cursos solo mira la etapa, como antes de que
-  // hubiera cursos: el de 'ambas etapas' le llega a cualquiera, incluso a
-  // quien todavía no tiene grupo.
+  // hubiera cursos: el de 'ambas etapas' le llega a cualquiera de la
+  // catequesis, incluso a quien todavía no tiene grupo. A los monitores de
+  // comunión y postcomunión NO: su agenda es independiente, solo les llegan
+  // los eventos de su propia etapa.
   if (!grade) {
-    return (
-      eventStage === "all" ||
-      stageGrades.some((stageGrade) => stageGrade.startsWith(`${eventStage}:`))
+    const stages = eventStage === "all" ? CATECHESIS_STAGES : [eventStage];
+    return stages.some((stage) =>
+      stageGrades.some((stageGrade) => stageGrade.startsWith(`${stage}:`))
     );
   }
 
-  const stages = eventStage === "all" ? ALL_STAGES : [eventStage];
+  const stages = eventStage === "all" ? CATECHESIS_STAGES : [eventStage];
 
   return stages.some((stage) => stageGrades.includes(`${stage}:${grade}`));
 };
@@ -280,5 +329,7 @@ export const getRoleLabel = (user: User): string => {
   if (user.role === "coordinator") {
     return user.stage ? `Coordinador · ${STAGE_LABELS[user.stage]}` : "Coordinador";
   }
-  return "Catequista";
+  // Un perfil de comunión o postcomunión que ya no coordina la etapa: no es
+  // catequista de nada, es un monitor con acceso a la app.
+  return isMonitorStageUser(user) ? `Monitor · ${STAGE_LABELS[user.stage!]}` : "Catequista";
 };

@@ -4,13 +4,17 @@ import { ParishEvent, User } from "../types";
 import { normalizeSearchText } from "../src/utils/text";
 import {
   ALL_GRADES,
+  CATECHESIS_STAGES,
   EventGrade,
   EventStage,
   GRADE_LABELS,
+  MONITOR_STAGES,
   STAGE_LABELS,
   canManageEventStage,
   getEventAudienceLabel,
+  isCatechesisStage,
   isGlobalCoordinator,
+  isMonitorStageUser,
   isTargetedEvent,
 } from "../src/utils/stages";
 
@@ -140,6 +144,19 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
 }) => {
   const isGlobal = isGlobalCoordinator(currentUser);
 
+  /**
+   * Un coordinador de comunión o de postcomunión no gestiona eventos de la
+   * catequesis: gestiona las REUNIONES de sus monitores. No tienen cursos ni
+   * invitados (sus monitores no tienen usuario de la app), así que la pantalla
+   * se queda solo con título, fecha y si cuenta para la asistencia.
+   */
+  const isMonitorAgenda = isMonitorStageUser(currentUser);
+
+  const words = isMonitorAgenda
+    ? { one: "reunión", add: "Añadir nueva reunión", list: "Reuniones programadas", remove: "Eliminar reunión", edit: "Editar reunión", created: "Reunión" }
+    : { one: "evento", add: "Añadir Nuevo Evento", list: "Eventos Activos", remove: "Eliminar evento", edit: "Editar evento", created: "Evento" };
+
+
   // El coordinador global elige a quién afecta el evento; el de etapa solo
   // puede crear eventos de la suya (RLS lo impone igualmente).
   const fixedStage: EventStage | null = isGlobal ? null : (currentUser.stage ?? null);
@@ -234,7 +251,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
       stage,
       grade,
       inviteOnly,
-      countsForAttendance: inviteOnly ? countsForAttendance : true,
+      countsForAttendance: inviteOnly || isMonitorAgenda ? countsForAttendance : true,
       inviteeIds: inviteOnly ? inviteeIds : [],
     });
 
@@ -284,7 +301,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
       date: editDateTime,
       stage: editingStage,
       grade: editingGrade,
-      countsForAttendance: editing.inviteOnly ? editCounts : true,
+      countsForAttendance: editing.inviteOnly || isMonitorAgenda ? editCounts : true,
       inviteeIds: editing.inviteOnly ? editInviteeIds : [],
     });
 
@@ -327,8 +344,17 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
         title="¿A qué etapa afecta el evento?"
       >
         <option value="all">{STAGE_LABELS.all}</option>
-        <option value="preconfirmation">{STAGE_LABELS.preconfirmation}</option>
-        <option value="confirmation">{STAGE_LABELS.confirmation}</option>
+        {CATECHESIS_STAGES.map((s) => (
+          <option key={s} value={s}>
+            {STAGE_LABELS[s]}
+          </option>
+        ))}
+        {/* Las etapas de monitores: sus reuniones solo les llegan a ellos. */}
+        {MONITOR_STAGES.map((s) => (
+          <option key={s} value={s}>
+            {STAGE_LABELS[s]}
+          </option>
+        ))}
       </select>
     );
 
@@ -365,11 +391,11 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
             <h3 className="text-lg font-semibold text-slate-800 mb-3">
-              Eliminar evento
+              {words.remove}
             </h3>
 
             <p className="text-slate-600 mb-6">
-              ¿Seguro que quieres eliminar el evento
+              ¿Seguro que quieres eliminar {isMonitorAgenda ? "la reunión" : "el evento"}
               <span className="font-semibold"> "{eventToDelete.title}"</span> del día
               <span className="font-semibold"> {formatDateTime(eventToDelete.date)}</span>
               ?
@@ -400,7 +426,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
       {editing && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 my-auto">
-            <h3 className="text-lg font-semibold text-slate-800">Editar evento</h3>
+            <h3 className="text-lg font-semibold text-slate-800">{words.edit}</h3>
 
             <input
               type="text"
@@ -445,9 +471,26 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
                 </label>
               </div>
             ) : (
-              <div className="flex flex-col sm:flex-row gap-3">
-                {stageSelect(editStage, setEditStage)}
-                {gradeSelect(editingStage, editingGrade, setEditGrade)}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  {stageSelect(editStage, setEditStage)}
+                  {isCatechesisStage(editingStage) &&
+                    gradeSelect(editingStage, editingGrade, setEditGrade)}
+                </div>
+
+                {isMonitorAgenda && (
+                  <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-violet-600 shrink-0"
+                      checked={editCounts}
+                      onChange={(e) => setEditCounts(e.target.checked)}
+                    />
+                    <span className="text-sm text-slate-700">
+                      Cuenta para el porcentaje de asistencia
+                    </span>
+                  </label>
+                )}
               </div>
             )}
 
@@ -481,17 +524,19 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
           <div className="flex items-start gap-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
             <Check size={16} className="mt-0.5 shrink-0" />
             <span>
-              Evento {notice.action}: <span className="font-bold">{notice.detail}</span>
+              {words.created} {notice.action}: <span className="font-bold">{notice.detail}</span>
             </span>
           </div>
         )}
 
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-800 mb-4">Añadir Nuevo Evento</h3>
+          <h3 className="text-lg font-bold text-slate-800 mb-4">{words.add}</h3>
 
           {/* Dos clases de evento: el de siempre, dirigido a una etapa y un
-              curso, y el específico, que solo les llega a los invitados. */}
-          <div className="flex gap-2 mb-4">
+              curso, y el específico, que solo les llega a los invitados. Un
+              coordinador de monitores solo tiene reuniones de su etapa: sus
+              monitores no tienen usuario al que invitar. */}
+          <div className={isMonitorAgenda ? "hidden" : "flex gap-2 mb-4"}>
             <button
               type="button"
               onClick={() => setInviteOnly(false)}
@@ -537,7 +582,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
               />
 
               {!inviteOnly && stageSelect(newStage, setNewStage)}
-              {!inviteOnly && gradeSelect(stage, grade, setNewGrade)}
+              {!inviteOnly && isCatechesisStage(stage) && gradeSelect(stage, grade, setNewGrade)}
 
               <button
                 onClick={() => void handleAdd()}
@@ -552,6 +597,23 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
                 <Plus size={24} />
               </button>
             </div>
+
+            {/* Las reuniones de monitores son el único evento de su etapa, así
+                que aquí sí se puede dejar una fuera del porcentaje (una
+                informativa, por ejemplo). */}
+            {isMonitorAgenda && !inviteOnly && (
+              <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-violet-100 bg-violet-50/40 px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-violet-600 shrink-0"
+                  checked={countsForAttendance}
+                  onChange={(e) => setCountsForAttendance(e.target.checked)}
+                />
+                <span className="text-sm text-slate-700">
+                  Cuenta para el porcentaje de asistencia
+                </span>
+              </label>
+            )}
 
             {inviteOnly && (
               <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
@@ -583,7 +645,7 @@ const AgendaManager: React.FC<AgendaManagerProps> = ({
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100">
-            <h3 className="font-bold text-slate-800">Eventos Activos</h3>
+            <h3 className="font-bold text-slate-800">{words.list}</h3>
           </div>
 
           <div className="divide-y divide-slate-100">

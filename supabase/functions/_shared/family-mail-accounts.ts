@@ -2,18 +2,17 @@
 //
 // Cuenta de Gmail de cada coordinador: desde ella envía "Contactar familias" y
 // es el buzón que se ve y se responde en "Correo". El coordinador de etapa usa
-// la de su etapa; el general (sin etapa), la del Grupo Joven. Comunión y
-// postcomunión no tienen coordinadores en la app: sus buzones solo los abre el
-// coordinador general desde Supercoordinación.
+// la de su etapa (también los de comunión y postcomunión); el general (sin
+// etapa), la del Grupo Joven, y desde Supercoordinación puede abrir cualquiera.
 //
 // Debe coincidir con FAMILY_EMAIL_SENDERS en components/FamilyContact.tsx.
 // La contraseña de aplicación de cada cuenta va en su secret y sirve tanto para
 // enviar (SMTP) como para leer (IMAP). Ver docs/contactar-familias.md.
 
-export type Stage = "preconfirmation" | "confirmation";
+export type Stage = "preconfirmation" | "confirmation" | "communion" | "postcommunion";
 
-/** Buzones que el coordinador general puede abrir en Supercoordinación. */
-export type Mailbox = Stage | "communion" | "postcommunion";
+/** Los buzones. Cada etapa tiene el suyo y el general usa el del Grupo Joven. */
+export type Mailbox = Stage;
 
 export const MAILBOXES: readonly Mailbox[] = ["preconfirmation", "confirmation", "communion", "postcommunion"];
 

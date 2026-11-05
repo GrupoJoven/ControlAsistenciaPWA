@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { User, Group, CatechistAttendanceRecord, AttendanceStatus, ParishEvent, calculateCatechistRate } from '../types';
 import { AcademicYear, getAcademicYearCutoff, isPastEvent } from '../src/utils/academicYear';
-import { getEventsForUser } from '../src/utils/stages';
+import { MonitorStage, STAGE_LABELS, getEventsForUser, isMonitorStage } from '../src/utils/stages';
 
 interface CatechistManagerProps {
   users: User[];
@@ -529,9 +529,16 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
             .map(id => groups.find(g => g.id === id)?.name)
             .filter(Boolean) as string[];
 
-          const catGroupLabel = names.length ? names.join(", ") : "Sin grupo";
+          // Un perfil de comunión o postcomunión no es catequista de ningún
+          // grupo: su asistencia se lleva en "Asistencia Monitores", sobre su
+          // calendario de actividades, así que aquí no se enseña un porcentaje
+          // calculado sobre días lectivos que no son suyos.
+          const isMonitorProfile = isMonitorStage(cat.stage);
+          const catGroupLabel = isMonitorProfile
+            ? STAGE_LABELS[cat.stage as MonitorStage]
+            : names.length ? names.join(", ") : "Sin grupo";
           const rate = calculateCatechistRate(cat, classDays, events, academicYear);
-          
+
           return (
             <div 
               key={cat.id} 
@@ -544,18 +551,29 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
               <h3 className="font-bold text-slate-900 truncate w-full">{cat.name}</h3>
               <p className="text-xs text-indigo-600 font-bold uppercase mt-1">{catGroupLabel}</p>
               
-              <div className="w-full mt-3 px-2">
-                <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase mb-1">
-                  <span>Asistencia Media</span>
-                  <span className={rate > 80 ? 'text-green-600' : rate > 50 ? 'text-amber-600' : 'text-red-600'}>{rate}%</span>
+              {isMonitorProfile ? (
+                <div className="w-full mt-3 px-2">
+                  <p className="text-[10px] font-bold text-violet-600 uppercase bg-violet-50 rounded-lg py-1.5">
+                    Equipo de monitores
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1 leading-tight">
+                    Su asistencia está en Asistencia Monitores
+                  </p>
                 </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-500 ${rate > 80 ? 'bg-green-500' : rate > 50 ? 'bg-amber-500' : 'bg-red-500'}`} 
-                    style={{ width: `${rate}%` }} 
-                  />
+              ) : (
+                <div className="w-full mt-3 px-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    <span>Asistencia Media</span>
+                    <span className={rate > 80 ? 'text-green-600' : rate > 50 ? 'text-amber-600' : 'text-red-600'}>{rate}%</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${rate > 80 ? 'bg-green-500' : rate > 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                      style={{ width: `${rate}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="mt-4 w-full pt-4 border-t border-slate-50 space-y-1">
                 <div className="flex items-center justify-center gap-2 text-xs text-slate-500 truncate"><Mail size={12}/> {cat.email}</div>
@@ -700,7 +718,21 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
               </div>
             </div>
 
-            {!isAdding && selectedUser && (
+            {/* El historial de un perfil de monitores se lleva en su propia
+                pantalla, sobre su calendario de actividades. */}
+            {!isAdding && selectedUser && isMonitorStage(selectedUser.stage) && (
+              <div className="rounded-2xl border border-violet-100 bg-violet-50/50 p-4 text-sm text-slate-600">
+                <p className="font-bold text-slate-800">
+                  Monitor de {STAGE_LABELS[selectedUser.stage as MonitorStage].toLowerCase()}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed">
+                  Su asistencia y su historial están en el registro y la asistencia de monitores,
+                  sobre el calendario de actividades de su etapa.
+                </p>
+              </div>
+            )}
+
+            {!isAdding && selectedUser && !isMonitorStage(selectedUser.stage) && (
               <div className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-lg font-bold text-slate-800">Historial</h4>

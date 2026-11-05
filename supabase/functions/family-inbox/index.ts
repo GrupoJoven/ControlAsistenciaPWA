@@ -114,8 +114,10 @@ Deno.serve(async (req) => {
     }
     if (profile.role !== "coordinator") return jsonResponse({ ok: false, error: "forbidden" }, 403);
 
-    const callerStage: Stage | null =
-      profile.stage === "preconfirmation" || profile.stage === "confirmation" ? profile.stage : null;
+    // Cada etapa tiene su buzón, también comunión y postcomunión.
+    const callerStage: Stage | null = MAILBOXES.includes(profile.stage as Stage)
+      ? (profile.stage as Stage)
+      : null;
     if (profile.stage && !callerStage) {
       return jsonResponse({ ok: false, error: "unknown_stage", stage: profile.stage }, 403);
     }
