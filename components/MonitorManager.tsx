@@ -220,8 +220,19 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
     setIsAccessOpen(false);
   };
 
+  /**
+   * Al dar de alta a un monitor, el nombre, el correo y el cumpleaños son
+   * obligatorios: el correo es por donde se le dará acceso a la app el día que
+   * lo necesite y el cumpleaños es lo que la parroquia celebra. En la edición
+   * no se exigen, para no dejar sin guardar una ficha vieja a la que le falte
+   * alguno (la del coordinador se crea con lo que tenga su perfil).
+   */
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const canAdd = !!name.trim() && isValidEmail(email) && !!birthDate;
+
   const handleAdd = async () => {
-    if (!name.trim() || isSaving) return;
+    if (!canAdd || isSaving) return;
 
     setIsSaving(true);
     const ok = await onAdd({
@@ -516,6 +527,7 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
                   Nombre
+                  {isAdding && <span className="text-violet-600 ml-1">*</span>}
                 </label>
                 <input
                   type="text"
@@ -530,14 +542,20 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
                   <Mail size={12} className="inline mr-1" />
                   Correo
+                  {isAdding && <span className="text-violet-600 ml-1">*</span>}
                 </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-violet-500"
-                  placeholder="opcional"
+                  placeholder={isAdding ? "nombre@correo.es" : "opcional"}
                 />
+                {isAdding && !!email.trim() && !isValidEmail(email) && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    Ese correo no tiene buena pinta: revísalo.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -559,6 +577,7 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">
                     <Calendar size={12} className="inline mr-1" />
                     Cumpleaños
+                    {isAdding && <span className="text-violet-600 ml-1">*</span>}
                   </label>
                   <input
                     type="date"
@@ -626,7 +645,12 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button
                   onClick={isAdding ? handleAdd : handleSave}
-                  disabled={!name.trim() || isSaving || !isOnline}
+                  disabled={(isAdding ? !canAdd : !name.trim()) || isSaving || !isOnline}
+                  title={
+                    isAdding && !canAdd
+                      ? "El nombre, el correo y el cumpleaños son obligatorios"
+                      : undefined
+                  }
                   className="flex-1 py-3 px-4 bg-violet-600 text-white font-bold rounded-xl hover:bg-violet-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Save size={18} />
@@ -644,6 +668,14 @@ const MonitorManager: React.FC<MonitorManagerProps> = ({
                   </button>
                 )}
               </div>
+
+              {isAdding && (
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  El nombre, el correo y el cumpleaños <span className="text-violet-600">*</span>{" "}
+                  son obligatorios: el correo es por donde se le dará acceso a la app si algún día
+                  lo necesita.
+                </p>
+              )}
 
               {selected?.profileId && (
                 <p className="text-xs text-slate-400 leading-relaxed">
