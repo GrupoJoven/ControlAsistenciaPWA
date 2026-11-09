@@ -65,7 +65,12 @@ const formatWeekday = (dateStr: string): string =>
 
 export interface AttendanceCsvOptions {
   students: Student[];
-  classDays: string[];
+  /**
+   * Los días lectivos de un alumno, que son los de la etapa de su grupo:
+   * preconfirmación y confirmación llevan calendarios distintos, así que cada
+   * alumno aporta sus propias filas.
+   */
+  classDaysOf: (student: Student) => string[];
   groups: Group[];
   /** Cursos a incluir. Uno solo para un curso concreto, varios para el histórico completo. */
   years: AcademicYear[];
@@ -79,7 +84,7 @@ export interface AttendanceCsvOptions {
  */
 export const buildAttendanceCsv = ({
   students,
-  classDays,
+  classDaysOf,
   groups,
   years,
 }: AttendanceCsvOptions): string => {
@@ -96,14 +101,16 @@ export const buildAttendanceCsv = ({
   for (const year of sortedYears) {
     const cutoff = getAcademicYearCutoff(year);
 
-    const yearClassDays = filterDatesByAcademicYear(classDays, year)
-      .filter((day) => day <= cutoff)
-      .sort((a, b) => a.localeCompare(b));
-
-    if (yearClassDays.length === 0) continue;
-
     for (const student of sortedStudents) {
-      const rate = calculateStudentRate(student, classDays, year);
+      const studentClassDays = classDaysOf(student);
+
+      const yearClassDays = filterDatesByAcademicYear(studentClassDays, year)
+        .filter((day) => day <= cutoff)
+        .sort((a, b) => a.localeCompare(b));
+
+      if (yearClassDays.length === 0) continue;
+
+      const rate = calculateStudentRate(student, studentClassDays, year);
       const groupName = groupNameById.get(student.groupId) ?? "SIN GRUPO";
 
       for (const day of yearClassDays) {

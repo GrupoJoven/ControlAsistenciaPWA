@@ -12,7 +12,10 @@ import {
 interface PromoteYearDialogProps {
   groups: Group[];
   students: Student[];
+  /** Días de todas las etapas, solo para saber qué cursos hay. */
   classDays: string[];
+  /** Los días lectivos de un alumno: los de la etapa de su grupo. */
+  classDaysOf: (student: Student) => string[];
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }
@@ -21,6 +24,7 @@ const PromoteYearDialog: React.FC<PromoteYearDialogProps> = ({
   groups,
   students,
   classDays,
+  classDaysOf,
   onClose,
   onConfirm,
 }) => {
@@ -49,7 +53,7 @@ const PromoteYearDialog: React.FC<PromoteYearDialogProps> = ({
   const handleDownload = () => {
     const csv = buildAttendanceCsv({
       students: preview.graduatingStudents,
-      classDays,
+      classDaysOf,
       groups,
       years: academicYears,
     });

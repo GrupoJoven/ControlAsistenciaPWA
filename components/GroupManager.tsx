@@ -23,7 +23,10 @@ interface GroupManagerProps {
   groups: Group[];
   students: Student[];
   users: User[];
+  /** Días de todas las etapas, para el selector de cursos del diálogo de promoción. */
   classDays: string[];
+  /** Los días lectivos de un alumno: los de la etapa de su grupo. */
+  classDaysOf: (student: Student) => string[];
   isOnline: boolean;
   /** Fecha de la última promoción del curso en marcha, o null si no se ha hecho. */
   lastPromotionAt: string | null;
@@ -57,6 +60,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   students,
   users,
   classDays,
+  classDaysOf,
   isOnline,
   lastPromotionAt,
   canPromote: canPromoteRole,
@@ -211,6 +215,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
           groups={groups}
           students={students}
           classDays={classDays}
+          classDaysOf={classDaysOf}
           onClose={() => setShowPromoteDialog(false)}
           onConfirm={async () => {
             await onPromoteYear();

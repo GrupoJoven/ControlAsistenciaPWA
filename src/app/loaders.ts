@@ -3,11 +3,14 @@ import { getOfflineData, saveOfflineData } from "../utils/offlineStorage";
 import { SchoolName, GroupCatechistLink } from "../types/app";
 import { Group, User, ParishEvent, Student, AttendanceRecord, AttendanceStatus } from "../../types";
 import {
+  CATECHESIS_STAGES,
+  CatechesisStage,
   EventStage,
   MONITOR_STAGES,
   MonitorStage,
   Stage,
   getGroupStage,
+  isCatechesisStage,
   isMonitorStage,
   toCountsForAttendance,
   toEventGrade,
@@ -216,27 +219,61 @@ export const loadEvents = async (): Promise<ParishEvent[]> => {
   return eventsMapped;
 };
 
-export const loadClassDays = async (): Promise<string[]> => {
-  let classDaysMapped: string[] = [];
+/** Lo que se guarda en la caché offline: una fila por etapa y día. */
+type ClassDayRow = { stage: string; date: string };
+
+/**
+ * Días lectivos por etapa de catequesis. Cada etapa lleva el suyo desde
+ * class_days_by_stage.sql; antes era un calendario único para las dos.
+ */
+export const loadClassDays = async (): Promise<Record<CatechesisStage, string[]>> => {
+  const group = (rows: ClassDayRow[]): Record<CatechesisStage, string[]> => {
+    const byStage: Record<CatechesisStage, string[]> = {
+      preconfirmation: [],
+      confirmation: [],
+    };
+
+    for (const row of rows) {
+      if (!isCatechesisStage(row.stage)) continue;
+      byStage[row.stage].push(String(row.date).slice(0, 10));
+    }
+
+    for (const stage of CATECHESIS_STAGES) byStage[stage].sort();
+
+    return byStage;
+  };
 
   try {
-    const { data: classDaysData, error: classDaysErr } = await supabase
+    const { data, error } = await supabase
       .from("class_days")
-      .select("date")
+      .select("stage, date")
       .order("date", { ascending: true });
 
-    if (classDaysErr) throw classDaysErr;
+    if (error) throw error;
 
-    classDaysMapped = (classDaysData ?? []).map((d) => String(d.date));
-    await saveOfflineData("classDays", classDaysMapped);
+    const rows: ClassDayRow[] = (data ?? []).map((row: any) => ({
+      stage: String(row.stage),
+      date: String(row.date),
+    }));
+
+    await saveOfflineData("classDays", rows);
+
+    return group(rows);
   } catch (error) {
     console.warn("No se pudieron cargar classDays desde Supabase, intentando offline", error);
 
-    const cached = await getOfflineData<string[]>("classDays");
-    classDaysMapped = cached?.data ?? [];
-  }
+    const cached = await getOfflineData<ClassDayRow[] | string[]>("classDays");
+    const data = cached?.data ?? [];
 
-  return classDaysMapped;
+    // Una caché de antes del cambio es una lista de fechas sueltas, que valían
+    // para las dos etapas: es lo que significaban entonces.
+    if (data.length > 0 && typeof data[0] === "string") {
+      const days = (data as string[]).map((day) => String(day).slice(0, 10)).sort();
+      return { preconfirmation: [...days], confirmation: [...days] };
+    }
+
+    return group(data as ClassDayRow[]);
+  }
 };
 
 // Cargar estudiantes

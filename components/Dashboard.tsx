@@ -24,11 +24,16 @@ interface DashboardProps {
    */
   events: ParishEvent[];
   onManageAgenda?: () => void;
-  classDays: string[];
+  /**
+   * Los días lectivos de un alumno, que son los de la etapa de su grupo:
+   * preconfirmación y confirmación llevan calendarios distintos, así que no
+   * hay una lista única con la que medir a todos.
+   */
+  classDaysOf: (student: Student) => string[];
   academicYear: AcademicYear;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda, classDays, academicYear }) => {
+const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda, classDaysOf, academicYear }) => {
   const today = getTodayStr();
   const cutoff = getAcademicYearCutoff(academicYear);
 
@@ -38,7 +43,7 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
     total: students.length,
     attendedCatechism: todayRecords.filter(r => r.catechism === 'present' || r.catechism === 'late').length,
     attendedMass: todayRecords.filter(r => r.mass === 'present' || r.mass === 'late').length,
-    atRisk: students.filter(s => calculateStudentRate(s, classDays, academicYear) < 60).length,
+    atRisk: students.filter(s => calculateStudentRate(s, classDaysOf(s), academicYear) < 60).length,
   };
 
   // Solo los eventos que aún no han pasado, ordenados de más próximo a más
@@ -73,37 +78,35 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
       ];
     }
 
-    // 1) Días lectivos del curso ya pasados
-    const pastClassDays = classDays.filter(
-      d => d >= academicYear.start && d <= cutoff
-    );
-
     const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-  
+
     // 2) Acumuladores mensuales
-    // monthTotals[month] = { totalWeight: suma pesos, nDays: nº días lectivos considerados }
-    const monthTotals: Record<string, { totalWeight: number; nDays: number }> = {};
-  
-    // 3) Recorremos días y sumamos peso de TODO el grupo (ausentes/no-registro = 0)
-    pastClassDays.forEach(day => {
-      let totalDayWeight = 0;
-  
-      students.forEach(student => {
+    // monthTotals[month] = { totalWeight: suma de pesos, slots: nº de
+    // (alumno, día lectivo suyo) que se han mirado }
+    const monthTotals: Record<string, { totalWeight: number; slots: number }> = {};
+
+    // 3) Se recorre ALUMNO a ALUMNO, cada uno por los días lectivos de SU
+    // etapa: con un calendario por etapa ya no hay una lista de días común a
+    // todos, así que el denominador se cuenta por alumno en vez de multiplicar
+    // por el total. Con un solo calendario sale exactamente lo mismo que antes
+    // (la suma de días de cada alumno es nAlumnos x nDías).
+    students.forEach(student => {
+      const studentDays = classDaysOf(student).filter(
+        d => d >= academicYear.start && d <= cutoff
+      );
+
+      studentDays.forEach(day => {
         const record = student.attendanceHistory.find(h => h.date === day);
-        if (record) {
-          totalDayWeight += calculateAttendanceWeight(record);
-        }
-        // Si no hay record: suma 0 (implícito)
+        const weight = record ? calculateAttendanceWeight(record) : 0;
+
+        const monthKey = monthNames[Number(day.slice(5, 7)) - 1];
+
+        if (!monthTotals[monthKey]) monthTotals[monthKey] = { totalWeight: 0, slots: 0 };
+        monthTotals[monthKey].totalWeight += weight;
+        monthTotals[monthKey].slots += 1; // cuenta aunque no haya asistido
       });
-  
-      const d = new Date(day);
-      const monthKey = monthNames[d.getMonth()];
-  
-      if (!monthTotals[monthKey]) monthTotals[monthKey] = { totalWeight: 0, nDays: 0 };
-      monthTotals[monthKey].totalWeight += totalDayWeight;
-      monthTotals[monthKey].nDays += 1; // contamos el día lectivo aunque haya sido 0
     });
-  
+
     // 4) Construimos secuencia académica Sep->Ago, pero cortamos en el mes tope
     const yearSequence = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7]; // Sep..Ago
 
@@ -113,9 +116,9 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
       const mName = monthNames[mIdx];
       const m = monthTotals[mName];
   
-      if (m && m.nDays > 0) {
-        // Media mensual ponderada por alumnos y días:
-        const avg = (m.totalWeight / (nStudents * m.nDays)) * 100;
+      if (m && m.slots > 0) {
+        // Media mensual: peso conseguido entre peso posible.
+        const avg = (m.totalWeight / m.slots) * 100;
         dataForChart.push({ name: mName, participación: Math.round(avg) });
       } else {
         // Si prefieres mostrar 0 en meses sin datos, descomenta:
@@ -130,7 +133,7 @@ const Dashboard: React.FC<DashboardProps> = ({ students, events, onManageAgenda,
       { name: 'Sep', participación: 0 },
       { name: monthNames[cutoffMonthIdx], participación: 0 }
     ];
-  }, [students, classDays, academicYear, cutoff]);
+  }, [students, classDaysOf, academicYear, cutoff]);
 
   return (
     <div className="space-y-6 lg:space-y-8">

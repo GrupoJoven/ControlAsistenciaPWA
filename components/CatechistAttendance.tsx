@@ -20,7 +20,13 @@ import {
 interface CatechistAttendanceProps {
   users: User[];
   events: ParishEvent[];
+  /** Los días lectivos del curso, de las dos etapas juntas. */
   classDays: string[];
+  /**
+   * Los días lectivos de un catequista: los de sus etapas. Cada etapa lleva su
+   * calendario, así que un día puede ser de una y no de la otra.
+   */
+  classDaysOf: (user: User) => string[];
   onUpdate: (
     userId: string,
     type: "class" | "event",
@@ -38,6 +44,7 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   users,
   events,
   classDays,
+  classDaysOf,
   onUpdate,
 }) => {
   const [mode, setMode] = useState<"class" | "event">("class");
@@ -135,10 +142,19 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
   // a nadie en un evento al que no estaba invitado. En días lectivos y eventos
   // para todos salen todos.
   const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
-  const visibleUsers =
-    mode === "event" && selectedEvent
-      ? users.filter((u) => eventAppliesToUser(selectedEvent, u))
-      : users;
+
+  const visibleUsers = useMemo(() => {
+    if (mode === "event") {
+      return selectedEvent ? users.filter((u) => eventAppliesToUser(selectedEvent, u)) : users;
+    }
+
+    if (!activeDate) return users;
+
+    // Un día lectivo es de las etapas que lo tienen marcado: a un catequista
+    // de confirmación no se le apunta falta en un día que solo es de
+    // preconfirmación.
+    return users.filter((u) => classDaysOf(u).includes(activeDate));
+  }, [mode, users, selectedEvent, activeDate, classDaysOf]);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-500">
@@ -250,6 +266,17 @@ const CatechistAttendance: React.FC<CatechistAttendanceProps> = ({
           <p className="font-bold">Nadie a quien pasar lista</p>
           <p className="text-xs sm:text-sm">
             Este evento no va dirigido a ninguno de los catequistas que puedes ver.
+          </p>
+        </div>
+      )}
+
+      {mode === "class" && activeDate && visibleUsers.length === 0 && (
+        <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border-2 border-dashed border-slate-100">
+          <Filter size={48} className="mx-auto mb-4 opacity-20" />
+          <p className="font-bold">Nadie a quien pasar lista</p>
+          <p className="text-xs sm:text-sm">
+            Ese día no es lectivo para ninguno de los catequistas que puedes ver: cada etapa lleva
+            su propio calendario.
           </p>
         </div>
       )}

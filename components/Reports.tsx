@@ -28,7 +28,12 @@ interface ReportsProps {
   students: Student[];
   currentUser: User;
   groups: Group[];
+  /** Días lectivos del curso de las dos etapas juntas: son las columnas del CSV. */
   classDays: string[];
+  /** Los días lectivos de un alumno: los de la etapa de su grupo. */
+  classDaysOfStudent: (student: Student) => string[];
+  /** Los de un catequista: los de todas sus etapas. */
+  classDaysOfUser: (user: User) => string[];
   users: User[];
   events: ParishEvent[];
   academicYear: AcademicYear;
@@ -60,6 +65,8 @@ const Reports: React.FC<ReportsProps> = ({
   currentUser,
   groups,
   classDays,
+  classDaysOfStudent,
+  classDaysOfUser,
   users,
   events,
   academicYear,
@@ -255,11 +262,18 @@ const Reports: React.FC<ReportsProps> = ({
 
       rows = filteredStudents
         .map((s) => {
-          const rate = calculateStudentRate(s, classDays, academicYear);
+          const rate = calculateStudentRate(s, classDaysOfStudent(s), academicYear);
           const groupName = groups.find((g) => g.id === s.groupId)?.name || "Sin Grupo";
+
+          // Las columnas son los días de las dos etapas, así que un día que no
+          // es lectivo en la del alumno no es ni presente ni ausente: se marca
+          // con un guion, igual que un evento que no le va dirigido.
+          const studentDays = new Set(classDaysOfStudent(s));
 
           const dateValues = pastClassDays
             .map((d) => {
+              if (!studentDays.has(d)) return "-,-";
+
               const record = s.attendanceHistory.find((h) => h.date === d);
               return `${getStatusLabel(record?.catechism)},${getStatusLabel(record?.mass)}`;
             })
@@ -289,15 +303,20 @@ const Reports: React.FC<ReportsProps> = ({
 
       rows = filteredCatechists
         .map((c) => {
-          const rate = calculateCatechistRate(c, classDays, events, academicYear);
+          const rate = calculateCatechistRate(c, classDaysOfUser(c), events, academicYear);
 
           // En tu modelo actual, un catequista puede estar en varios grupos.
           // Para CSV mostramos "Varios" si no hay forma directa de inferir un único grupo.
           // Si quieres listar todos sus grupos, habría que pasar groupCatechistLinks.
           const groupName = "Varios";
 
+          const userDays = new Set(classDaysOfUser(c));
+
           const classDateValues = pastClassDays
             .map((d) => {
+              // Un día lectivo de la otra etapa no le afecta.
+              if (!userDays.has(d)) return "-,-";
+
               const record = c.attendanceHistory?.find(
                 (h: any) => h.date === d && h.type === "class"
               );

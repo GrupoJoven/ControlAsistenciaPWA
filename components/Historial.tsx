@@ -195,7 +195,9 @@ const Historial: React.FC<HistorialProps> = ({
 
                 <AttendanceDownloadButton
                   students={students}
-                  classDays={allClassDays}
+                  // Un histórico es siempre de un grupo, así que todos sus
+                  // alumnos comparten el calendario de su etapa.
+                  classDaysOf={() => allClassDays}
                   groups={groups}
                   availableYears={availableAcademicYears}
                   selectedYear={academicYear}

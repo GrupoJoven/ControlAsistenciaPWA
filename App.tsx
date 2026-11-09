@@ -32,7 +32,7 @@ import {
 
 } from "./src/app/loaders";
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { 
   Plus, 
   TriangleAlert,
@@ -43,6 +43,9 @@ import {
 } from 'lucide-react';
 import { Student, AttendanceRecord, User, Group, ParishEvent, getTodayStr, AttendanceStatus, CatechistAttendanceRecord } from './types';
 import {
+  ALL_STAGES,
+  CATECHESIS_STAGES,
+  CatechesisStage,
   EventGrade,
   EventStage,
   MONITOR_STAGES,
@@ -66,6 +69,13 @@ import {
   getMonitorStageConfig,
   toMonitorName,
 } from './src/utils/monitors';
+import {
+  StageCalendars,
+  classDaysForGroup,
+  classDaysForStages,
+  classDaysForStudent,
+  classDaysForUser,
+} from './src/utils/calendars';
 import { canSeeView } from './src/app/navigation';
 import Dashboard from './components/Dashboard';
 import AttendanceTracker from './components/AttendanceTracker';
@@ -123,7 +133,12 @@ const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [events, setEvents] = useState<ParishEvent[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [classDays, setClassDays] = useState<string[]>([]);
+  // Un calendario lectivo por etapa de catequesis (class_days_by_stage.sql):
+  // preconfirmación y confirmación lo fijan cada una por su cuenta.
+  const [classDaysByStage, setClassDaysByStage] = useState<Record<CatechesisStage, string[]>>({
+    preconfirmation: [],
+    confirmation: [],
+  });
   const [users, setUsers] = useState<User[]>([]);
   const [incidentUsers, setIncidentUsers] = useState<User[]>([]);
 
@@ -141,6 +156,11 @@ const App: React.FC = () => {
    * suyo.
    */
   const [teamTab, setTeamTab] = useState<"catechists" | MonitorStage>("catechists");
+  /**
+   * Qué calendario se está mirando, en "Calendario escolar" y en su gestión.
+   * Quien solo lleva una etapa no ve el selector.
+   */
+  const [calendarStage, setCalendarStage] = useState<Stage>("preconfirmation");
   const [searchQuery, setSearchQuery] = useState('');
   // Correo que "Email Padres" (Todos los Niños) deja preparado para Correo.
   const [mailDraft, setMailDraft] = useState<MailDraft | null>(null);
@@ -522,9 +542,7 @@ const App: React.FC = () => {
     setEvents(eventsMapped);
 
     // --- class_days ---
-    const classDaysMapped = await loadClassDays();
-
-    setClassDays(classDaysMapped);
+    setClassDaysByStage(await loadClassDays());
 
     // --- monitores de comunión y postcomunión ---
     const monitorsMapped = await loadMonitors();
@@ -646,7 +664,7 @@ const App: React.FC = () => {
     setUsers([]);
     setIncidentUsers([]);
     setEvents([]);
-    setClassDays([]);
+    setClassDaysByStage({ preconfirmation: [], confirmation: [] });
     setMonitors([]);
     setMonitorActivityDays({ communion: [], postcommunion: [] });
     setBaseDataLoaded(false);
@@ -685,20 +703,61 @@ const App: React.FC = () => {
     [students]
   );
 
+  // --- Calendarios por etapa -------------------------------------------------
+  // Las cuatro etapas llevan el suyo: los días lectivos de preconfirmación y
+  // confirmación (class_days) y los de actividad de comunión y postcomunión
+  // (monitor_activity_days). Se juntan aquí para que el resto de la app
+  // pregunte siempre igual: "¿qué días le tocan a esto?".
+  const stageCalendars = useMemo<StageCalendars>(
+    () => ({
+      preconfirmation: classDaysByStage.preconfirmation,
+      confirmation: classDaysByStage.confirmation,
+      communion: monitorActivityDays.communion,
+      postcommunion: monitorActivityDays.postcommunion,
+    }),
+    [classDaysByStage, monitorActivityDays]
+  );
+
+  const allStageDays = useMemo(
+    () => ALL_STAGES.flatMap((stage) => stageCalendars[stage] ?? []),
+    [stageCalendars]
+  );
+
+  // Van con useCallback porque son dependencias de los useMemo que calculan
+  // porcentajes y gráficas: si cambiaran de identidad en cada render, esos
+  // cálculos se repetirían sin que nada hubiera cambiado.
+
+  /** Los días lectivos de un grupo: los de su etapa. */
+  const classDaysOfGroup = useCallback(
+    (group: Group | null | undefined) => classDaysForGroup(stageCalendars, group),
+    [stageCalendars]
+  );
+
+  /** Los de un alumno: los del grupo en el que está. */
+  const classDaysOfStudent = useCallback(
+    (student: Student) => classDaysForStudent(stageCalendars, groups, student),
+    [stageCalendars, groups]
+  );
+
+  /** Los de un catequista: los de todas sus etapas. */
+  const classDaysOfUser = useCallback(
+    (user: User) => classDaysForUser(stageCalendars, user),
+    [stageCalendars]
+  );
+
   // Solo cuentan días lectivos y asistencia. Los eventos de la agenda quedan
   // fuera a propósito: una entrada con fecha lejana haría aparecer un curso
   // entero en el selector sin que exista un solo registro de asistencia.
   const availableAcademicYears = useMemo(
     () =>
       listAcademicYears(
-        classDays,
         attendanceDates,
-        // Los días de actividad de los monitores: para su coordinador son los
-        // únicos registros que hay, así que sin ellos el selector de curso se
-        // quedaría solo con el actual.
-        MONITOR_STAGES.flatMap((stage) => monitorActivityDays[stage] ?? [])
+        // Los días de TODAS las etapas: los de monitores son, para su
+        // coordinador, los únicos registros que hay, así que sin ellos el
+        // selector de curso se quedaría solo con el actual.
+        allStageDays
       ),
-    [classDays, attendanceDates, monitorActivityDays]
+    [attendanceDates, allStageDays]
   );
 
   const selectedAcademicYear = useMemo(
@@ -717,10 +776,17 @@ const App: React.FC = () => {
     academicYearState === 'current' ||
     (academicYearState === 'past' && currentUser?.role === 'coordinator');
 
-  const academicYearClassDays = useMemo(
-    () => filterDatesByAcademicYear(classDays, selectedAcademicYear),
-    [classDays, selectedAcademicYear]
+  /** El calendario del grupo que el usuario tiene abierto en "Mi Grupo". */
+  const activeGroupClassDays = useMemo(
+    () => classDaysOfGroup(groups.find((group) => group.id === activeGroupId)),
+    [stageCalendars, groups, activeGroupId]
   );
+
+  const academicYearActiveGroupClassDays = useMemo(
+    () => filterDatesByAcademicYear(activeGroupClassDays, selectedAcademicYear),
+    [activeGroupClassDays, selectedAcademicYear]
+  );
+
 
   // Eventos dirigidos al usuario: los de su etapa y su curso, los de 'all' y
   // los específicos a los que está invitado. RLS ya los filtra en el servidor,
@@ -1453,7 +1519,6 @@ const App: React.FC = () => {
   const isMonitorUser = myMonitorStage !== null;
   const activeMonitorStage: MonitorStage =
     myMonitorStage ?? (teamTab === "catechists" ? "communion" : teamTab);
-  const activeMonitorConfig = getMonitorStageConfig(activeMonitorStage);
 
   /**
    * ¿Las pantallas compartidas muestran monitores? Para un coordinador de
@@ -1461,6 +1526,49 @@ const App: React.FC = () => {
    * de esas pestañas.
    */
   const showMonitorTeam = isMonitorUser || (isGlobal && teamTab !== "catechists");
+
+  // --- Selector de calendario ------------------------------------------------
+  // Qué calendarios puede MODIFICAR: el general los cuatro, un coordinador de
+  // etapa solo el suyo. Y qué calendarios puede VER: los de sus etapas, que en
+  // un catequista con grupos en las dos son los dos.
+  const manageableCalendarStages = useMemo<Stage[]>(
+    () => (isGlobal ? [...ALL_STAGES] : currentUser?.stage ? [currentUser.stage] : []),
+    [isGlobal, currentUser]
+  );
+
+  const visibleCalendarStages = useMemo<Stage[]>(() => {
+    if (isGlobal) return [...ALL_STAGES];
+
+    const mine = currentUserWithStages?.stages ?? [];
+    if (mine.length > 0) return mine;
+
+    return currentUser?.stage ? [currentUser.stage] : [...CATECHESIS_STAGES];
+  }, [isGlobal, currentUserWithStages, currentUser]);
+
+  /** La etapa elegida, o la primera que valga si la elegida no está en la lista. */
+  const pickCalendarStage = (allowed: Stage[]): Stage =>
+    allowed.includes(calendarStage) ? calendarStage : allowed[0] ?? "preconfirmation";
+
+  /** Pestañas de etapa. No se dibujan si solo hay una: no hay nada que elegir. */
+  const calendarStageTabs = (allowed: Stage[], selected: Stage) =>
+    allowed.length <= 1 ? null : (
+      <div className="flex flex-wrap gap-2 mb-6">
+        {allowed.map((stage) => (
+          <button
+            key={stage}
+            type="button"
+            onClick={() => setCalendarStage(stage)}
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              selected === stage
+                ? "bg-indigo-600 text-white shadow-md"
+                : "bg-white border border-slate-200 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            {STAGE_LABELS[stage]}
+          </button>
+        ))}
+      </div>
+    );
 
   /**
    * Pestañas para el coordinador general: el equipo de catequesis y los dos de
@@ -1915,82 +2023,68 @@ const App: React.FC = () => {
     );
   };
 
-  const toggleClassDay = async (date: string) => {
-    if (blockIfOffline("modificar el calendario lectivo")) return;
-    const exists = classDays.includes(date);
-
-    if (!exists) {
-      const { error } = await supabase
-        .from("class_days")
-        .insert({ date });
-
-      if (error) {
-        alert("Error al añadir día lectivo: " + error.message);
-        return;
-      }
-
-      setClassDays(prev => [...prev, date].sort());
-      return;
-    }
-
-    const { error } = await supabase
-      .from("class_days")
-      .delete()
-      .eq("date", date);
-
-    if (error) {
-      alert("Error al quitar día lectivo: " + error.message);
-      return;
-    }
-
-    setClassDays(prev => prev.filter(d => d !== date));
-  };
-
-
-  // --- Monitores de comunión y postcomunión ----------------------------------
-
   /**
-   * Calendario de actividades de una etapa de monitores. Es el equivalente de
-   * toggleClassDay, pero cada etapa lleva el suyo: comunión y postcomunión son
-   * independientes entre ellas y de la catequesis.
+   * Marcar o desmarcar un día en el calendario de una etapa. Las cuatro lo
+   * llevan por separado, solo que en dos tablas distintas: class_days para la
+   * catequesis y monitor_activity_days para los monitores. RLS comprueba en
+   * las dos que quien escribe coordina esa etapa (can_access_stage).
    */
-  const toggleMonitorActivityDay = async (stage: MonitorStage, date: string) => {
-    if (blockIfOffline("modificar el calendario de actividades")) return;
+  const toggleCalendarDay = async (stage: Stage, date: string) => {
+    const monitorStage = isMonitorStage(stage);
 
-    const exists = (monitorActivityDays[stage] ?? []).includes(date);
+    if (
+      blockIfOffline(
+        monitorStage ? "modificar el calendario de actividades" : "modificar el calendario lectivo"
+      )
+    ) {
+      return;
+    }
 
-    if (!exists) {
-      const { error } = await supabase
-        .from("monitor_activity_days")
-        .insert({ stage, date });
+    const table = monitorStage ? "monitor_activity_days" : "class_days";
+    const label = monitorStage ? "el día de actividad" : "el día lectivo";
+
+    const current = monitorStage
+      ? monitorActivityDays[stage as MonitorStage] ?? []
+      : classDaysByStage[stage as CatechesisStage] ?? [];
+
+    const apply = (next: (days: string[]) => string[]) => {
+      if (monitorStage) {
+        setMonitorActivityDays(prev => ({
+          ...prev,
+          [stage]: next(prev[stage as MonitorStage] ?? []),
+        }));
+      } else {
+        setClassDaysByStage(prev => ({
+          ...prev,
+          [stage]: next(prev[stage as CatechesisStage] ?? []),
+        }));
+      }
+    };
+
+    if (!current.includes(date)) {
+      const { error } = await supabase.from(table).insert({ stage, date });
 
       if (error) {
-        alert("Error al añadir el día de actividad: " + error.message);
+        alert(`Error al añadir ${label}: ` + error.message);
         return;
       }
 
-      setMonitorActivityDays(prev => ({
-        ...prev,
-        [stage]: [...(prev[stage] ?? []), date].sort(),
-      }));
+      apply(days => [...days, date].sort());
       return;
     }
 
     const { error } = await supabase
-      .from("monitor_activity_days")
+      .from(table)
       .delete()
       .eq("stage", stage)
       .eq("date", date);
 
     if (error) {
-      alert("Error al quitar el día de actividad: " + error.message);
+      alert(`Error al quitar ${label}: ` + error.message);
       return;
     }
 
-    setMonitorActivityDays(prev => ({
-      ...prev,
-      [stage]: (prev[stage] ?? []).filter(d => d !== date),
-    }));
+    apply(days => days.filter(d => d !== date));
   };
 
   /**
@@ -2766,14 +2860,21 @@ const App: React.FC = () => {
                 personal={currentUser.role !== 'coordinator'}
               />
             ) : (
-              <Dashboard students={students} events={myEvents} onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined} classDays={classDays} academicYear={selectedAcademicYear} />
+              <Dashboard
+                students={students}
+                events={myEvents}
+                onManageAgenda={currentUser.role === 'coordinator' ? () => setCurrentView('agenda') : undefined}
+                // Cada alumno se mide con el calendario de su etapa.
+                classDaysOf={classDaysOfStudent}
+                academicYear={selectedAcademicYear}
+              />
             )
           )}
           {currentView === 'attendance' && (
             <AttendanceTracker
               students={myCatecumenos}
               onUpdate={updateStudentAttendance}
-              classDays={classDays}
+              classDays={activeGroupClassDays}
               warningMessage={warningMessage}
               warningType={showNoGroupWarning ? "no-group" : showNoStudentsWarning ? "no-students" : undefined}
               isOnline={isOnline}
@@ -2783,8 +2884,8 @@ const App: React.FC = () => {
             <Historial
               students={myCatecumenos}
               onUpdate={updateHistoricalStudentAttendance}
-              classDays={academicYearClassDays}
-              allClassDays={classDays}
+              classDays={academicYearActiveGroupClassDays}
+              allClassDays={activeGroupClassDays}
               groups={groups}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
@@ -2799,8 +2900,7 @@ const App: React.FC = () => {
             <HistoricoGrupos
               groups={groups}
               students={students}
-              classDays={academicYearClassDays}
-              allClassDays={classDays}
+              classDaysOfGroup={classDaysOfGroup}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
               canEdit={canEditSelectedYear}
@@ -2808,10 +2908,19 @@ const App: React.FC = () => {
               isOnline={isOnline}
             />
           )}
-          {currentView === 'school-calendar' && (
-            // Comunión y postcomunión no tienen días lectivos: ven el suyo.
-            <SchoolCalendar classDays={isMonitorUser ? activeMonitorActivityDays : classDays} />
-          )}
+          {currentView === 'school-calendar' && (() => {
+            // Cada etapa tiene su calendario, así que quien lleva más de una
+            // (un catequista con grupos en las dos, o el coordinador general)
+            // elige cuál mira.
+            const stage = pickCalendarStage(visibleCalendarStages);
+
+            return (
+              <>
+                {calendarStageTabs(visibleCalendarStages, stage)}
+                <SchoolCalendar classDays={stageCalendars[stage] ?? []} />
+              </>
+            );
+          })()}
           {currentView === 'drive' && (
             <Drive
               isOnline={isOnline}
@@ -2836,7 +2945,7 @@ const App: React.FC = () => {
               onUpdateStudent={(s) => void updateStudent(s)}
               groups={groups}
               canEditCenso={false}
-              classDays={classDays}
+              classDaysOf={classDaysOfStudent}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
               canEditAttendance={canEditSelectedYear}
@@ -2865,7 +2974,7 @@ const App: React.FC = () => {
               onAddStudent={(s) => void addStudent(s)}
               onRemoveStudent={(id) => void removeStudent(id)}
               groups={groups}
-              classDays={classDays}
+              classDaysOf={classDaysOfStudent}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
               canEditAttendance={canEditSelectedYear}
@@ -2914,7 +3023,7 @@ const App: React.FC = () => {
                   onSetUserGroups={(uid, gids) => setUserGroups(uid, gids)}
                   getUserGroupIds={(uid) => getUserGroupIdsFromLinks(uid, groupCatechistLinks)}
                   groups={groups}
-                  classDays={classDays}
+                  classDaysOf={classDaysOfUser}
                   events={visibleEvents}
                   academicYear={selectedAcademicYear}
                   onResetPassword={(uid, pw) => resetPassword(uid, pw)}
@@ -2944,7 +3053,13 @@ const App: React.FC = () => {
                     u => (u.role === 'catechist' || u.role === 'coordinator') && !isMonitorStage(u.stage)
                   )}
                   events={academicYearEvents}
-                  classDays={academicYearClassDays}
+                  // La lista de días es la unión de las dos etapas; dentro, cada
+                  // día solo le sale a quien es de la etapa que lo tiene.
+                  classDays={filterDatesByAcademicYear(
+                    classDaysForStages(stageCalendars, CATECHESIS_STAGES),
+                    selectedAcademicYear
+                  )}
+                  classDaysOf={classDaysOfUser}
                   onUpdate={updateCatechistAttendance}
                 />
               )}
@@ -3013,7 +3128,8 @@ const App: React.FC = () => {
               groups={groupsWithCatechists}
               students={students}
               users={usersWithStages}
-              classDays={classDays}
+              classDays={allStageDays}
+              classDaysOf={classDaysOfStudent}
               isOnline={isOnline}
               lastPromotionAt={lastPromotionAt}
               canPromote={isGlobal}
@@ -3026,31 +3142,48 @@ const App: React.FC = () => {
             />
           )}
 
-          {currentView === 'class-days' && currentUser.role === 'coordinator' && (
-            <>
-              {teamTabs}
-              {showMonitorTeam ? (
+          {currentView === 'class-days' && currentUser.role === 'coordinator' && (() => {
+            // Las cuatro etapas llevan su calendario: el coordinador de cada
+            // una modifica el suyo y el general, cualquiera de los cuatro.
+            const stage = pickCalendarStage(manageableCalendarStages);
+            const monitorStage = isMonitorStage(stage);
+            const config = monitorStage ? getMonitorStageConfig(stage) : null;
+
+            if (manageableCalendarStages.length === 0) {
+              return (
+                <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border-2 border-dashed border-slate-100">
+                  <p className="font-bold">No tienes ningún calendario que gestionar</p>
+                </div>
+              );
+            }
+
+            return (
+              <>
+                {calendarStageTabs(manageableCalendarStages, stage)}
                 <ClassDayManager
-                  classDays={activeMonitorActivityDays}
+                  classDays={stageCalendars[stage] ?? []}
                   academicYear={selectedAcademicYear}
-                  onToggle={(d) => void toggleMonitorActivityDay(activeMonitorStage, d)}
-                  labels={{
-                    title: `Calendario de ${activeMonitorConfig.label.toLowerCase()}`,
-                    subtitle: `Marca los ${activeMonitorConfig.dayLabelPlural} del curso.`,
-                    badge: 'ACTIVIDAD',
-                    day: activeMonitorConfig.dayLabel,
-                    days: activeMonitorConfig.dayLabelPlural,
-                  }}
+                  onToggle={(d) => void toggleCalendarDay(stage, d)}
+                  labels={
+                    config
+                      ? {
+                          title: `Calendario de ${config.label.toLowerCase()}`,
+                          subtitle: `Marca los ${config.dayLabelPlural} del curso.`,
+                          badge: 'ACTIVIDAD',
+                          day: config.dayLabel,
+                          days: config.dayLabelPlural,
+                        }
+                      : {
+                          title: `Calendario de ${STAGE_LABELS[stage].toLowerCase()}`,
+                          subtitle: `Marca los días lectivos de ${STAGE_LABELS[
+                            stage
+                          ].toLowerCase()}.`,
+                        }
+                  }
                 />
-              ) : (
-                <ClassDayManager
-                  classDays={classDays}
-                  academicYear={selectedAcademicYear}
-                  onToggle={(d) => void toggleClassDay(d)}
-                />
-              )}
-            </>
-          )}
+              </>
+            );
+          })()}
           {currentView === 'agenda' && currentUser.role === 'coordinator' && (
             <AgendaManager
               currentUser={currentUser}
@@ -3066,7 +3199,11 @@ const App: React.FC = () => {
               students={students}
               currentUser={currentUserWithStages ?? currentUser}
               groups={groups}
-              classDays={classDays}
+              // Las columnas del CSV son los días de las dos etapas; cada fila
+              // se mide con el calendario que le toca.
+              classDays={classDaysForStages(stageCalendars, CATECHESIS_STAGES)}
+              classDaysOfStudent={classDaysOfStudent}
+              classDaysOfUser={classDaysOfUser}
               users={usersWithStages}
               events={visibleEvents}
               academicYear={selectedAcademicYear}

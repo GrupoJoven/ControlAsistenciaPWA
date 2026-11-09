@@ -29,7 +29,8 @@ interface CatechistManagerProps {
   users: User[];
   filteredUsers?: User[];
   groups: Group[];
-  classDays: string[];
+  /** Los días lectivos de un catequista: los de todas sus etapas. */
+  classDaysOf: (user: User) => string[];
   events: ParishEvent[];
   academicYear: AcademicYear;
   onResetPassword: (userId: string, newPassword: string) => Promise<void>;
@@ -55,7 +56,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
   users,
   filteredUsers,
   groups,
-  classDays,
+  classDaysOf,
   events,
   academicYear,
   onResetPassword,
@@ -94,7 +95,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
     // Días lectivos y eventos relevantes (solo pasado). De los eventos, solo
     // los de las etapas del catequista (más los de 'all'): los de la otra
     // etapa no le afectan y no deben aparecer como ausencias.
-    const relevantClassDays = classDays.filter(d => d >= academicYear.start && d <= end);
+    const relevantClassDays = classDaysOf(user).filter(d => d >= academicYear.start && d <= end);
     const relevantEvents = getEventsForUser(events, user).filter(e =>
       isPastEvent(e.date, academicYear)
     );
@@ -537,7 +538,7 @@ const CatechistManager: React.FC<CatechistManagerProps> = ({
           const catGroupLabel = isMonitorProfile
             ? STAGE_LABELS[cat.stage as MonitorStage]
             : names.length ? names.join(", ") : "Sin grupo";
-          const rate = calculateCatechistRate(cat, classDays, events, academicYear);
+          const rate = calculateCatechistRate(cat, classDaysOf(cat), events, academicYear);
 
           return (
             <div 

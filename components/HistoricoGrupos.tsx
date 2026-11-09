@@ -28,10 +28,12 @@ const rateBarColor = (rate: number) =>
 interface HistoricoGruposProps {
   groups: Group[];
   students: Student[];
-  /** Días lectivos del curso seleccionado. */
-  classDays: string[];
-  /** Todos los días lectivos, de cualquier curso, para la descarga completa. */
-  allClassDays: string[];
+  /**
+   * Los días lectivos de un grupo, de cualquier curso: los de su etapa.
+   * Preconfirmación y confirmación llevan calendarios distintos, así que no
+   * hay una lista única que valga para todos los grupos.
+   */
+  classDaysOfGroup: (group: Group | null | undefined) => string[];
   academicYear: AcademicYear;
   availableAcademicYears: AcademicYear[];
   canEdit: boolean;
@@ -47,8 +49,7 @@ interface HistoricoGruposProps {
 const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
   groups,
   students,
-  classDays,
-  allClassDays,
+  classDaysOfGroup,
   academicYear,
   availableAcademicYears,
   canEdit,
@@ -58,6 +59,10 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   const todayRaw = getTodayStr();
+
+  /** Los días de un alumno: los del grupo en el que está. */
+  const classDaysOfStudent = (student: Student) =>
+    classDaysOfGroup(groups.find((group) => group.id === student.groupId));
   const hasParticipation = (
     record: AttendanceRecord | undefined
   ): record is AttendanceRecord => {
@@ -95,10 +100,13 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
    * los que no se pasó lista, y contarlos como 0 hundiría la previsión.
    */
   const statsByGroup = useMemo(() => {
-    const historicalDays = classDays.filter((day) => day < todayRaw);
     const result = new Map<string, GroupStats>();
 
     for (const group of sortedGroups) {
+      // Los días del curso seleccionado que son de la etapa de ESTE grupo.
+      const historicalDays = classDaysOfGroup(group).filter(
+        (day) => day >= academicYear.start && day <= academicYear.end && day < todayRaw
+      );
       const groupStudents = studentsByGroup.get(group.id) ?? [];
       const recordsByStudent = groupStudents.map(
         (student) =>
@@ -146,7 +154,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
     }
 
     return result;
-  }, [studentsByGroup, classDays, todayRaw, sortedGroups]);
+  }, [studentsByGroup, classDaysOfGroup, academicYear, todayRaw, sortedGroups]);
 
   const selectedGroup = useMemo(() => {
     return groups.find((group) => group.id === selectedGroupId) ?? null;
@@ -164,8 +172,10 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
     return (
       <Historial
         students={selectedGroupStudents}
-        classDays={classDays}
-        allClassDays={allClassDays}
+        classDays={classDaysOfGroup(selectedGroup).filter(
+          (day) => day >= academicYear.start && day <= academicYear.end
+        )}
+        allClassDays={classDaysOfGroup(selectedGroup)}
         groups={groups}
         academicYear={academicYear}
         availableAcademicYears={availableAcademicYears}
@@ -202,7 +212,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
 
             <AttendanceDownloadButton
               students={students}
-              classDays={allClassDays}
+              classDaysOf={classDaysOfStudent}
               groups={groups}
               availableYears={availableAcademicYears}
               selectedYear={academicYear}
@@ -355,7 +365,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
                 <div className="mt-4 pt-4 border-t border-slate-100">
                   <AttendanceDownloadButton
                     students={groupStudents}
-                    classDays={allClassDays}
+                    classDaysOf={classDaysOfStudent}
                     groups={groups}
                     availableYears={availableAcademicYears}
                     selectedYear={academicYear}

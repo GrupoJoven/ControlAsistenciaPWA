@@ -30,7 +30,8 @@ interface StudentListProps {
   onAddStudent?: (s: Student) => void;
   onRemoveStudent?: (id: string) => Promise<void>;
   groups?: Group[];
-  classDays: string[];
+  /** Los días lectivos de un alumno: los de la etapa de su grupo. */
+  classDaysOf: (student: Student) => string[];
   academicYear: AcademicYear;
   availableAcademicYears: AcademicYear[];
   /** false en cursos ya cerrados cuando el usuario no es coordinator. */
@@ -56,7 +57,7 @@ const StudentList: React.FC<StudentListProps> = ({
   onAddStudent,
   onRemoveStudent,
   groups = [],
-  classDays,
+  classDaysOf,
   academicYear,
   availableAcademicYears,
   canEditAttendance,
@@ -119,7 +120,7 @@ const StudentList: React.FC<StudentListProps> = ({
 
   const getFullHistory = (student: Student) => {
     const cutoff = getAcademicYearCutoff(academicYear);
-    const relevantClassDays = classDays.filter(day => day >= academicYear.start && day <= cutoff);
+    const relevantClassDays = classDaysOf(student).filter(day => day >= academicYear.start && day <= cutoff);
 
     const fullHistory = relevantClassDays.map(day => {
       const existing = student.attendanceHistory.find(h => h.date === day);
@@ -519,7 +520,7 @@ const StudentList: React.FC<StudentListProps> = ({
         <div className="flex items-center gap-2">
           <AttendanceDownloadButton
             students={filteredStudents}
-            classDays={classDays}
+            classDaysOf={classDaysOf}
             groups={groups}
             availableYears={availableAcademicYears}
             selectedYear={academicYear}
@@ -549,7 +550,7 @@ const StudentList: React.FC<StudentListProps> = ({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredStudents.map(student => {
-          const rate = calculateStudentRate(student, classDays, academicYear);
+          const rate = calculateStudentRate(student, classDaysOf(student), academicYear);
           const groupName = groups.find(g => g.id === student.groupId)?.name || 'SIN GRUPO';
 
           return (
@@ -868,7 +869,7 @@ const StudentList: React.FC<StudentListProps> = ({
                   <div className="flex items-center gap-2">
                     <AttendanceDownloadButton
                       students={[selectedStudent]}
-                      classDays={classDays}
+                      classDaysOf={classDaysOf}
                       groups={groups}
                       availableYears={availableAcademicYears}
                       selectedYear={academicYear}

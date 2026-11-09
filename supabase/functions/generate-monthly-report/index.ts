@@ -658,13 +658,40 @@ serve(async (req) => {
     // class days y events del curso. De los eventos, un coordinador de etapa
     // solo ve los suyos y los de 'all'; y a cada catequista solo se le exigen
     // los dirigidos a él: sus etapas y cursos, o su invitación.
+    // Cada etapa lleva su calendario lectivo (class_days_by_stage.sql), así que
+    // a cada catequista solo se le exigen los días de SUS etapas: a uno de
+    // preconfirmación no se le apunta falta en un día que solo es de
+    // confirmación.
     const { data: classDays, error: cdErr } = await admin
       .from("class_days")
-      .select("date")
+      .select("stage, date")
       .gte("date", start)
       .lte("date", todayISO);
 
     if (cdErr) return serverError("Error cargando class_days.", { detail: cdErr.message });
+
+    const classDaysByStage = new Map<string, Set<string>>();
+
+    for (const row of classDays ?? []) {
+      const stage = String((row as any).stage);
+      const set = classDaysByStage.get(stage) ?? new Set<string>();
+      set.add(String((row as any).date).slice(0, 10));
+      classDaysByStage.set(stage, set);
+    }
+
+    /** Los días lectivos de un catequista: los de todas sus etapas. */
+    const classDaysForStages = (stages: Stage[]): Set<string> => {
+      // Sin etapas calculadas se le piden los de todas, que es lo que valía
+      // cuando el calendario era uno solo.
+      const wanted = stages.length > 0 ? stages : ALL_STAGES;
+      const days = new Set<string>();
+
+      for (const stage of wanted) {
+        for (const day of classDaysByStage.get(stage) ?? []) days.add(day);
+      }
+
+      return days;
+    };
 
     let evQuery = admin
       .from("parish_events")
@@ -700,7 +727,11 @@ serve(async (req) => {
       }
     }
 
-    const nClass = (classDays ?? []).length;
+    // Para el texto del informe: los días lectivos de cada etapa del ámbito.
+    const scopeStages: Stage[] = callerStage ? [callerStage] : ALL_STAGES;
+    const classDaysLine = scopeStages
+      .map((stage) => `${STAGE_LABELS[stage]}: ${(classDaysByStage.get(stage) ?? new Set()).size}`)
+      .join(" · ");
     const nEvents = (evs ?? []).length;
 
     // Los eventos que cuentan para un catequista: los que van dirigidos a él y
@@ -735,15 +766,19 @@ serve(async (req) => {
     if (caeErr) return serverError("Error cargando catechist_attendance_events.", { detail: caeErr.message });
 
     // Agregación simple: contamos asistencias "present"/"late" como asistencia.
-    const byP = new Map<string, { classAttend: number; classPossible: number; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
+    const byP = new Map<string, { classAttend: number; classPossible: number; classDays: Set<string>; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
     for (const pid of catechistIds) {
       const applicable = eventsCountingFor(
         String(pid),
         stageGradesById.get(String(pid)) ?? []
       );
+      const ownClassDays = classDaysForStages(stagesById.get(String(pid)) ?? []);
+
       byP.set(pid, {
         classAttend: 0,
-        classPossible: nClass * 2,
+        // Los días de SUS etapas, cada uno catequesis + misa.
+        classPossible: ownClassDays.size * 2,
+        classDays: ownClassDays,
         eventAttend: 0,
         eventPossible: applicable.length,
         eventIds: new Set(applicable.map((e: any) => String(e.id))),
@@ -755,6 +790,11 @@ serve(async (req) => {
       const pid = String((r as any).profile_id);
       const obj = byP.get(pid);
       if (!obj) continue;
+
+      // Un registro de un día que no es lectivo en sus etapas no suma: si no,
+      // el porcentaje podría pasar del 100% (puede quedar alguno de cuando el
+      // calendario era común a las dos).
+      if (!obj.classDays.has(String((r as any).date).slice(0, 10))) continue;
 
       // catechism + mass pueden estar presentes/late/absent
       const c = (r as any).catechism;
@@ -796,7 +836,7 @@ serve(async (req) => {
       [
         `ÁMBITO: Equipo de catequistas${callerStage ? ` de ${STAGE_LABELS[callerStage]}` : ""}`,
         `PERIODO: ${start} a ${todayISO}`,
-        `DÍAS LECTIVOS: ${nClass} (cada uno cuenta catequesis+misa)`,
+        `DÍAS LECTIVOS POR ETAPA: ${classDaysLine} (cada día cuenta catequesis+misa, y a cada catequista solo se le exigen los de sus etapas)`,
         `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los que van dirigidos a él y cuentan para la asistencia)`,
         ``,
         `PARTICIPACIÓN MÁS BAJA:`,

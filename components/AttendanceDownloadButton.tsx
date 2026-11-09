@@ -13,7 +13,8 @@ type Variant = "primary" | "onDark" | "subtle";
 interface AttendanceDownloadButtonProps {
   /** Alumnos incluidos en la descarga. El llamante ya los filtra según el rol. */
   students: Student[];
-  classDays: string[];
+  /** Los días lectivos de un alumno: los de la etapa de su grupo. */
+  classDaysOf: (student: Student) => string[];
   groups: Group[];
   availableYears: AcademicYear[];
   /** Curso preseleccionado en el diálogo. */
@@ -38,7 +39,7 @@ const ALL_YEARS = "all";
 
 const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
   students,
-  classDays,
+  classDaysOf,
   groups,
   availableYears,
   selectedYear,
@@ -63,22 +64,30 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
     return found ? [found] : [selectedYear];
   }, [choice, availableYears, selectedYear]);
 
-  /** Días lectivos que caerán en el fichero, para avisar si no hay nada que descargar. */
+  /**
+   * Filas que caerán en el fichero, para avisar si no hay nada que descargar.
+   * Se cuentan por alumno porque cada etapa lleva su calendario.
+   */
   const classDayCount = useMemo(() => {
     return yearsToExport.reduce((total, year) => {
       return (
         total +
-        classDays.filter((day) => day >= year.start && day <= year.end).length
+        students.reduce(
+          (perStudent, student) =>
+            perStudent +
+            classDaysOf(student).filter((day) => day >= year.start && day <= year.end).length,
+          0
+        )
       );
     }, 0);
-  }, [yearsToExport, classDays]);
+  }, [yearsToExport, students, classDaysOf]);
 
   const hasData = students.length > 0 && classDayCount > 0;
 
   const handleDownload = () => {
     const csv = buildAttendanceCsv({
       students,
-      classDays,
+      classDaysOf,
       groups,
       years: yearsToExport,
     });
