@@ -126,6 +126,38 @@ export const isPastEvent = (
 };
 
 /**
+ * Una fecha por cada curso comprendido entre dos fechas, ambas incluidas.
+ *
+ * Sirve para preguntar qué cursos hay a partir solo de la primera y la última
+ * fecha con registros, sin recorrer todos. Si falta alguno de los extremos no
+ * hay nada que recorrer: `listAcademicYears` añade siempre el curso actual.
+ *
+ * Al ir por el rango, un curso intermedio sin ningún registro también entra.
+ * Es cosmético —aparece en el selector y se ve vacío— y a cambio no hay que
+ * traerse miles de filas solo para mirarles la fecha.
+ */
+export const datesSpanningAcademicYears = (
+  min: string | null,
+  max: string | null
+): string[] => {
+  if (!min || !max) return [];
+
+  const primero = getAcademicYearStartYear(min);
+  const ultimo = getAcademicYearStartYear(max);
+  const fechas: string[] = [];
+
+  for (
+    let startYear = Math.min(primero, ultimo);
+    startYear <= Math.max(primero, ultimo);
+    startYear++
+  ) {
+    fechas.push(`${startYear}-09-01`);
+  }
+
+  return fechas;
+};
+
+/**
  * Cursos con datos, del más reciente al más antiguo. El curso actual se
  * incluye siempre aunque todavía no tenga ningún registro.
  */

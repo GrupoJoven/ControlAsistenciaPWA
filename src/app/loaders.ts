@@ -16,6 +16,7 @@ import {
   toEventGrade,
 } from "../utils/stages";
 import type { Monitor, MonitorAttendanceRecord, MonitorRole } from "../utils/monitors";
+import type { AcademicYear } from "../utils/academicYear";
 
 export const signMediaUrl = async (path?: string | null): Promise<string> => {
   if (!path) return "";
@@ -364,11 +365,15 @@ export const cargarTodasLasFilas = async (
   table: string,
   columns: string,
   orderBy: string[],
+  /** Filtros a aplicar a cada página, p. ej. acotar por fechas de un curso. */
+  acotar?: (query: any) => any,
   pageSize = 1000,
   paginasPorLote = PAGINAS_POR_LOTE
 ): Promise<any[]> => {
   const pagina = async (from: number) => {
     let query = supabase.from(table).select(columns);
+
+    if (acotar) query = acotar(query);
 
     for (const col of orderBy) query = query.order(col, { ascending: true });
 
@@ -405,15 +410,75 @@ export const cargarTodasLasFilas = async (
   }
 };
 
-// Cargar asistencia de estudiantes
-export const loadAttendance = async (): Promise<Map<string, AttendanceRecord[]>> => {
+/**
+ * Primera y última fecha con asistencia registrada, o null si no hay ninguna.
+ *
+ * Son dos consultas de UNA fila. Sirven para saber qué cursos ofrecer en el
+ * selector sin tener que traerse el histórico entero solo para mirar las
+ * fechas: con el mínimo y el máximo ya se sabe entre qué cursos se mueve.
+ *
+ * La contrapartida es que un curso intermedio sin ningún registro aparecería
+ * igualmente en la lista. Es cosmético, y cuesta 2 filas en vez de miles.
+ */
+export const loadAttendanceDateRange = async (): Promise<{
+  min: string | null;
+  max: string | null;
+}> => {
+  const extremo = async (ascending: boolean) => {
+    const { data, error } = await supabase
+      .from("student_attendance")
+      .select("date")
+      .order("date", { ascending })
+      .limit(1);
+
+    if (error) throw error;
+
+    return data?.[0]?.date ? String(data[0].date) : null;
+  };
+
+  try {
+    const [min, max] = await Promise.all([extremo(true), extremo(false)]);
+
+    await saveOfflineData("attendanceRange", { min, max });
+
+    return { min, max };
+  } catch (error) {
+    console.warn(
+      "No se pudo leer el rango de fechas de asistencia, intentando offline",
+      error
+    );
+
+    const cached = await getOfflineData<{ min: string | null; max: string | null }>(
+      "attendanceRange"
+    );
+
+    return cached?.data ?? { min: null, max: null };
+  }
+};
+
+/**
+ * Asistencia de estudiantes. Con `year`, solo la de ese curso: es lo que miran
+ * todas las pantallas, y el histórico completo ya pasa de 5.000 filas y crece
+ * cada semana. Sin `year`, el histórico entero, que es lo que necesita la copia
+ * de seguridad previa a promocionar curso.
+ *
+ * La caché offline va por curso para que una carga acotada no pise el histórico
+ * guardado de otro.
+ */
+export const loadAttendance = async (
+  year?: AcademicYear
+): Promise<Map<string, AttendanceRecord[]>> => {
   let attendanceByStudent: Map<string, AttendanceRecord[]> = new Map();
+  const claveCache = year ? `attendance:${year.key}` : "attendance";
 
   try {
     const all = await cargarTodasLasFilas(
       "student_attendance",
       "student_id, date, catechism, mass",
-      ["student_id", "date"]
+      ["student_id", "date"],
+      year
+        ? (query) => query.gte("date", year.start).lte("date", year.end)
+        : undefined
     );
 
     for (const record of all ?? []) {
@@ -428,11 +493,11 @@ export const loadAttendance = async (): Promise<Map<string, AttendanceRecord[]>>
       attendanceByStudent.set(record.student_id, currentRecords);
     }
 
-    await saveOfflineData("attendance", Array.from(attendanceByStudent.entries()));
+    await saveOfflineData(claveCache, Array.from(attendanceByStudent.entries()));
   } catch (error) {
     console.warn("No se pudo cargar la asistencia de estudiantes desde Supabase, intentando offline", error);
 
-    const cached = await getOfflineData<Map<string, AttendanceRecord[]>>("attendance");
+    const cached = await getOfflineData<Map<string, AttendanceRecord[]>>(claveCache);
     attendanceByStudent = new Map(cached?.data ?? []);
   }
 

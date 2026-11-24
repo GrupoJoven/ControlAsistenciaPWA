@@ -26,6 +26,7 @@ import {
   loadClassDays,
   loadStudents,
   loadAttendance,
+  loadAttendanceDateRange,
   loadMonitors,
   loadMonitorActivityDays,
   loadMonitorAttendance,
@@ -35,10 +36,11 @@ import {
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { 
-  Plus, 
+  Plus,
   TriangleAlert,
   Bell,
   BellOff,
+  Loader2,
   Search,
   X
 } from 'lucide-react';
@@ -120,9 +122,12 @@ import {
 import { ImportedStudent } from "./src/utils/studentImport";
 
 import {
+  AcademicYear,
+  datesSpanningAcademicYears,
   filterDatesByAcademicYear,
   findAcademicYearByKey,
   getAcademicYearState,
+  getCurrentAcademicYear,
   getDefaultAcademicYear,
   listAcademicYears,
 } from "./src/utils/academicYear";
@@ -174,6 +179,23 @@ const App: React.FC = () => {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [selectedAcademicYearKey, setSelectedAcademicYearKey] = useState<string | null>(null);
   const [lastPromotionAt, setLastPromotionAt] = useState<string | null>(null);
+
+  // Primera y última fecha con asistencia. Es lo único que hace falta para
+  // saber qué cursos ofrecer en el selector, y cuesta dos filas: la asistencia
+  // se carga solo del curso que se está viendo, así que las fechas de los demás
+  // cursos ya no están en memoria para deducirlos.
+  const [attendanceRange, setAttendanceRange] = useState<{
+    min: string | null;
+    max: string | null;
+  }>({ min: null, max: null });
+
+  // Asistencia ya cargada, por clave de curso. Cambiar de curso pide a la red
+  // la primera vez y vuelve instantáneo después.
+  const attendanceByYearRef = useRef(new Map<string, Map<string, AttendanceRecord[]>>());
+  // Curso cuya asistencia se está pidiendo, para descartar respuestas que
+  // lleguen tarde si se cambia de curso mientras tanto.
+  const attendanceRequestRef = useRef<string | null>(null);
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
 
   const [baseDataLoaded, setBaseDataLoaded] = useState(false);
   const [todayBirthdays, setTodayBirthdays] = useState<BirthdayInfo[]>([]);
@@ -460,6 +482,11 @@ const App: React.FC = () => {
   const loadBaseData = async (user: User) => {
     setBaseDataLoaded(false);
 
+    // La caché por curso es de la sesión anterior: lo que se podía ver depende
+    // del usuario, así que se empieza de cero en cada carga.
+    attendanceByYearRef.current.clear();
+    attendanceRequestRef.current = null;
+
     // Ninguna de estas cargas necesita el resultado de otra: lo que venía
     // después solo combinaba los datos ya en memoria. Antes se encadenaban con
     // un `await` cada una y salían 20 llamadas en serie que sumaban casi 6 s
@@ -474,10 +501,18 @@ const App: React.FC = () => {
       return promesa;
     };
 
+    // La asistencia se pide ya acotada al curso en marcha sin esperar a saber
+    // qué cursos hay: getCurrentAcademicYear() sale del calendario, no de los
+    // datos, y es el curso que queda seleccionado por defecto salvo que no
+    // tenga ni un registro. Si resultara ser otro, el efecto que vigila el
+    // curso seleccionado se encarga de pedir el que toque.
+    const cursoInicial = getCurrentAcademicYear();
+
     const pGruposYEnlaces = loadGroupsAndLinks();
     const pPerfiles = loadProfiles();
     const pAlumnos = loadStudents();
-    const pAsistenciaAlumnos = loadAttendance();
+    const pAsistenciaAlumnos = loadAttendance(cursoInicial);
+    const pRangoAsistencia = loadAttendanceDateRange();
     const pPromocion = sinRechazoSuelto(
       Promise.resolve(
         supabase
@@ -564,6 +599,11 @@ const App: React.FC = () => {
     const studentsMapped = await pAlumnos;
     const attendanceByStudent = await pAsistenciaAlumnos;
 
+    // Queda en la caché para que el efecto del curso seleccionado no vuelva a
+    // pedir lo que ya acabamos de traer.
+    attendanceByYearRef.current.set(cursoInicial.key, attendanceByStudent);
+    attendanceRequestRef.current = cursoInicial.key;
+
     // Combinar asistencia con estudiantes
     const studentsWithAttendance = studentsMapped.map((student) => ({
       ...student,
@@ -571,6 +611,8 @@ const App: React.FC = () => {
     }));
 
     setStudents(studentsWithAttendance);
+
+    setAttendanceRange(await pRangoAsistencia);
 
     // --- promoción de curso ya realizada ---
     // En agosto, septiembre y octubre el curso de destino es el que empieza este
@@ -709,9 +751,12 @@ const App: React.FC = () => {
   // --- Curso académico -------------------------------------------------------
   // El curso va del 1 de septiembre al 31 de agosto. Se ofrecen en el selector
   // los cursos que tengan algún registro, más el actual aunque esté vacío.
+  // Antes salían de students[].attendanceHistory, pero ahí ya solo está el
+  // curso que se está viendo: deducir de ahí los cursos disponibles dejaría el
+  // selector con uno solo. Se deducen del rango de fechas, que son dos filas.
   const attendanceDates = useMemo(
-    () => students.flatMap((student) => (student.attendanceHistory ?? []).map((h) => h.date)),
-    [students]
+    () => datesSpanningAcademicYears(attendanceRange.min, attendanceRange.max),
+    [attendanceRange]
   );
 
   // --- Calendarios por etapa -------------------------------------------------
@@ -780,6 +825,109 @@ const App: React.FC = () => {
 
   const academicYearState = getAcademicYearState(selectedAcademicYear);
   const isCurrentAcademicYear = academicYearState === 'current';
+
+  // La asistencia de los alumnos se carga curso a curso, así que al cambiar de
+  // curso en el selector hay que pedir la de ese curso. La primera vez va a la
+  // red; después sale de la caché y el cambio es inmediato.
+  //
+  // No se arranca hasta que loadBaseData ha terminado: esa carga ya trae la del
+  // curso en marcha y la deja en la caché, y así no se pide dos veces.
+  useEffect(() => {
+    if (!currentUser || !baseDataLoaded) return;
+
+    const clave = selectedAcademicYear.key;
+
+    if (attendanceRequestRef.current === clave) return;
+
+    attendanceRequestRef.current = clave;
+
+    const aplicar = (porAlumno: Map<string, AttendanceRecord[]>) => {
+      setStudents((previos) =>
+        previos.map((student) => ({
+          ...student,
+          attendanceHistory: porAlumno.get(student.id) ?? [],
+        }))
+      );
+    };
+
+    const yaCargado = attendanceByYearRef.current.get(clave);
+
+    if (yaCargado) {
+      aplicar(yaCargado);
+      return;
+    }
+
+    let cancelado = false;
+
+    setIsLoadingAttendance(true);
+
+    void loadAttendance(selectedAcademicYear)
+      .then((porAlumno) => {
+        attendanceByYearRef.current.set(clave, porAlumno);
+
+        // Si mientras llegaba se ha cambiado de curso otra vez, esta respuesta
+        // ya no es la que toca pintar.
+        if (cancelado || attendanceRequestRef.current !== clave) return;
+
+        aplicar(porAlumno);
+      })
+      .finally(() => {
+        if (!cancelado) setIsLoadingAttendance(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [currentUser, baseDataLoaded, selectedAcademicYear]);
+
+  /**
+   * La caché por curso deja de valer en cuanto se escribe asistencia: el estado
+   * ya se actualiza al guardar, pero lo cacheado sería de antes del cambio y al
+   * volver a ese curso pisaría lo editado con la versión vieja.
+   */
+  const olvidarAsistenciaCacheada = useCallback(() => {
+    attendanceByYearRef.current.clear();
+  }, []);
+
+  /**
+   * El histórico COMPLETO de asistencia, todos los cursos, pedido a demanda.
+   *
+   * Lo necesita la copia de seguridad que se descarga antes de promocionar
+   * curso: es el historial entero de los que se dan de baja, y leerlo de
+   * `students` daría solo el curso que se esté viendo. No se guarda en la
+   * caché por curso porque no es de un curso.
+   */
+  const loadFullAttendance = useCallback(
+    () => loadAttendance(),
+    []
+  );
+
+  /**
+   * La asistencia de los cursos que se van a exportar a CSV.
+   *
+   * Se pide en el momento de descargar en vez de leerla de `students`, donde
+   * solo está el curso que se está viendo: el diálogo de descarga permite
+   * elegir otro curso, o todos, y entonces el fichero saldría a medias sin que
+   * nada avisara. Un curso se pide acotado; varios, el histórico completo, que
+   * `buildAttendanceCsv` ya recorta por curso.
+   */
+  const loadAttendanceForExport = useCallback(
+    async (years: AcademicYear[]) => {
+      if (years.length === 1) {
+        const yaCargado = attendanceByYearRef.current.get(years[0].key);
+
+        if (yaCargado) return yaCargado;
+
+        const porAlumno = await loadAttendance(years[0]);
+        attendanceByYearRef.current.set(years[0].key, porAlumno);
+
+        return porAlumno;
+      }
+
+      return loadAttendance();
+    },
+    []
+  );
 
   // Un curso cerrado solo lo corrige el coordinator. En uno que todavía no ha
   // empezado no hay nada que editar, así que no se habilita para nadie.
@@ -879,6 +1027,8 @@ const App: React.FC = () => {
       alert("Error guardando asistencia: " + error.message);
       return;
     }
+
+    olvidarAsistenciaCacheada();
 
     setStudents(prev =>
       prev.map(st => {
@@ -1136,6 +1286,8 @@ const App: React.FC = () => {
         // seguimos, porque el alumno ya está actualizado
       }
     }
+
+    olvidarAsistenciaCacheada();
 
     // 3) reflejar en estado local (incluyendo tempHistory)
     setStudents(prev =>
@@ -2829,6 +2981,17 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* La asistencia de cada curso se pide al cambiar de curso, así que
+            hay un momento en que lo que se ve es del curso anterior. */}
+        {isLoadingAttendance && (
+          <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900 shadow-sm flex items-center gap-3">
+            <Loader2 size={18} className="animate-spin shrink-0" />
+            <p className="text-sm font-semibold">
+              Cargando la asistencia del {selectedAcademicYear.label}...
+            </p>
+          </div>
+        )}
+
         {!isCurrentAcademicYear && (
           <div className="mx-4 mt-4 lg:mx-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm">
             <div className="flex items-start gap-3">
@@ -2900,6 +3063,7 @@ const App: React.FC = () => {
               groups={groups}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
+              loadAttendanceForExport={loadAttendanceForExport}
               canEdit={canEditSelectedYear}
               scopeLabel={currentGroupName || 'Mi grupo'}
               warningMessage={warningMessage}
@@ -2914,6 +3078,7 @@ const App: React.FC = () => {
               classDaysOfGroup={classDaysOfGroup}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
+              loadAttendanceForExport={loadAttendanceForExport}
               canEdit={canEditSelectedYear}
               onUpdate={updateHistoricalStudentAttendance}
               isOnline={isOnline}
@@ -2959,6 +3124,7 @@ const App: React.FC = () => {
               classDaysOf={classDaysOfStudent}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
+              loadAttendanceForExport={loadAttendanceForExport}
               canEditAttendance={canEditSelectedYear}
               downloadScopeLabel={currentGroupName || 'Mi grupo'}
               warningMessage={warningMessage}
@@ -2988,6 +3154,7 @@ const App: React.FC = () => {
               classDaysOf={classDaysOfStudent}
               academicYear={selectedAcademicYear}
               availableAcademicYears={availableAcademicYears}
+              loadAttendanceForExport={loadAttendanceForExport}
               canEditAttendance={canEditSelectedYear}
               downloadScopeLabel="Todos los niños"
               enableMassServices={true}
@@ -3150,6 +3317,7 @@ const App: React.FC = () => {
               onAssignCatechist={(uid, gid, assign) => void setCatechistInGroup(uid, gid, assign)}
               onPromoteYear={promoteAcademicYear}
               onCreateGroupWithStudents={createGroupWithStudents}
+              loadFullAttendance={loadFullAttendance}
             />
           )}
 

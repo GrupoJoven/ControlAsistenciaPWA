@@ -36,6 +36,10 @@ interface HistoricoGruposProps {
   classDaysOfGroup: (group: Group | null | undefined) => string[];
   academicYear: AcademicYear;
   availableAcademicYears: AcademicYear[];
+  /** La asistencia de los cursos a exportar: en memoria solo está el curso visible. */
+  loadAttendanceForExport: (
+    years: AcademicYear[]
+  ) => Promise<Map<string, AttendanceRecord[]>>;
   canEdit: boolean;
   onUpdate: (
     date: string,
@@ -52,6 +56,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
   classDaysOfGroup,
   academicYear,
   availableAcademicYears,
+  loadAttendanceForExport,
   canEdit,
   onUpdate,
   isOnline,
@@ -179,6 +184,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
         groups={groups}
         academicYear={academicYear}
         availableAcademicYears={availableAcademicYears}
+        loadAttendanceForExport={loadAttendanceForExport}
         canEdit={canEdit}
         scopeLabel={selectedGroup.name}
         onUpdate={onUpdate}
@@ -215,6 +221,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
               classDaysOf={classDaysOfStudent}
               groups={groups}
               availableYears={availableAcademicYears}
+              loadAttendanceForExport={loadAttendanceForExport}
               selectedYear={academicYear}
               scopeLabel="Todos los grupos"
               buttonLabel="Descargar todo"
@@ -368,6 +375,7 @@ const HistoricoGrupos: React.FC<HistoricoGruposProps> = ({
                     classDaysOf={classDaysOfStudent}
                     groups={groups}
                     availableYears={availableAcademicYears}
+                    loadAttendanceForExport={loadAttendanceForExport}
                     selectedYear={academicYear}
                     scopeLabel={group.name}
                     variant="subtle"

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, Download, Loader2, Trash2, X } from "lucide-react";
-import { Group, Student } from "../types";
+import { AttendanceRecord, Group, Student } from "../types";
 import { buildPromotionPreview } from "../src/utils/coursePromotion";
 import { listAcademicYears } from "../src/utils/academicYear";
 import {
@@ -16,6 +16,12 @@ interface PromoteYearDialogProps {
   classDays: string[];
   /** Los días lectivos de un alumno: los de la etapa de su grupo. */
   classDaysOf: (student: Student) => string[];
+  /**
+   * El histórico completo de asistencia, todos los cursos. `students` solo
+   * trae el del curso que se está viendo, y esta copia tiene que llevar el
+   * historial entero de los que se dan de baja.
+   */
+  loadFullAttendance: () => Promise<Map<string, AttendanceRecord[]>>;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }
@@ -25,12 +31,14 @@ const PromoteYearDialog: React.FC<PromoteYearDialogProps> = ({
   students,
   classDays,
   classDaysOf,
+  loadFullAttendance,
   onClose,
   onConfirm,
 }) => {
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [hasVerifiedBackup, setHasVerifiedBackup] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const preview = useMemo(
@@ -38,28 +46,48 @@ const PromoteYearDialog: React.FC<PromoteYearDialogProps> = ({
     [groups, students]
   );
 
-  const academicYears = useMemo(() => {
-    const attendanceDates = students.flatMap((student) =>
-      (student.attendanceHistory ?? []).map((h) => h.date)
-    );
-    return listAcademicYears(classDays, attendanceDates);
-  }, [classDays, students]);
-
   const hasGraduating = preview.graduatingStudents.length > 0;
 
   // Sin alumnos que dar de baja no hay copia que hacer, así que no se exige.
   const backupReady = !hasGraduating || (hasDownloaded && hasVerifiedBackup);
 
-  const handleDownload = () => {
-    const csv = buildAttendanceCsv({
-      students: preview.graduatingStudents,
-      classDaysOf,
-      groups,
-      years: academicYears,
-    });
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    setError(null);
 
-    downloadCsv(buildAttendanceFileName("bajas_2_confirmacion", null), csv);
-    setHasDownloaded(true);
+    try {
+      // El historial entero se pide aquí, no se lee de `students`: en memoria
+      // solo está el curso que se está viendo, y esta copia es lo único que
+      // queda de estos alumnos cuando se les da de baja.
+      const porAlumno = await loadFullAttendance();
+
+      const graduandosConHistorico = preview.graduatingStudents.map((student) => ({
+        ...student,
+        attendanceHistory: porAlumno.get(student.id) ?? [],
+      }));
+
+      const fechasDeAsistencia = graduandosConHistorico.flatMap((student) =>
+        student.attendanceHistory.map((h) => h.date)
+      );
+
+      const csv = buildAttendanceCsv({
+        students: graduandosConHistorico,
+        classDaysOf,
+        groups,
+        years: listAcademicYears(classDays, fechasDeAsistencia),
+      });
+
+      downloadCsv(buildAttendanceFileName("bajas_2_confirmacion", null), csv);
+      setHasDownloaded(true);
+    } catch (e) {
+      setError(
+        "No se pudo preparar la copia de seguridad: " +
+          (e instanceof Error ? e.message : String(e)) +
+          ". No promociones el curso sin ella."
+      );
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const handleConfirm = async () => {
@@ -182,16 +210,24 @@ const PromoteYearDialog: React.FC<PromoteYearDialogProps> = ({
 
               <button
                 type="button"
-                onClick={handleDownload}
-                disabled={isRunning}
-                className={`mt-4 w-full px-5 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-colors ${
+                onClick={() => void handleDownload()}
+                disabled={isRunning || isDownloading}
+                className={`mt-4 w-full px-5 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60 ${
                   hasDownloaded
                     ? "bg-white text-amber-800 border-2 border-amber-400"
                     : "bg-amber-500 text-white hover:bg-amber-600"
                 }`}
               >
-                <Download size={18} />
-                {hasDownloaded ? "Descargar de nuevo" : "Descargar histórico (CSV)"}
+                {isDownloading ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Download size={18} />
+                )}
+                {isDownloading
+                  ? "Reuniendo el histórico..."
+                  : hasDownloaded
+                  ? "Descargar de nuevo"
+                  : "Descargar histórico (CSV)"}
               </button>
 
               <label

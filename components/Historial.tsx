@@ -8,7 +8,7 @@ import {
   Clock,
   Filter,
 } from "lucide-react";
-import { AttendanceStatus, Group, Student, getTodayStr } from "../types";
+import { AttendanceRecord, AttendanceStatus, Group, Student, getTodayStr } from "../types";
 import { AcademicYear, getAcademicYearState } from "../src/utils/academicYear";
 import AttendanceDownloadButton from "./AttendanceDownloadButton";
 
@@ -21,6 +21,10 @@ interface HistorialProps {
   groups: Group[];
   academicYear: AcademicYear;
   availableAcademicYears: AcademicYear[];
+  /** La asistencia de los cursos a exportar: en memoria solo está el curso visible. */
+  loadAttendanceForExport: (
+    years: AcademicYear[]
+  ) => Promise<Map<string, AttendanceRecord[]>>;
   /** false en cursos ya cerrados cuando el usuario no es coordinator. */
   canEdit: boolean;
   /** Nombre del grupo, usado en el fichero descargado. */
@@ -46,6 +50,7 @@ const Historial: React.FC<HistorialProps> = ({
   groups,
   academicYear,
   availableAcademicYears,
+  loadAttendanceForExport,
   canEdit,
   scopeLabel,
   onUpdate,
@@ -200,6 +205,7 @@ const Historial: React.FC<HistorialProps> = ({
                   classDaysOf={() => allClassDays}
                   groups={groups}
                   availableYears={availableAcademicYears}
+                  loadAttendanceForExport={loadAttendanceForExport}
                   selectedYear={academicYear}
                   scopeLabel={parentLabel ?? scopeLabel}
                   variant="onDark"

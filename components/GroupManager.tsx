@@ -12,7 +12,7 @@ import {
   GraduationCap,
   UserPlus
 } from 'lucide-react';
-import { Group, Student, User } from '../types';
+import { AttendanceRecord, Group, Student, User } from '../types';
 import { isPromotionMonth } from '../src/utils/coursePromotion';
 import { Stage } from '../src/utils/stages';
 import { ImportedStudent } from '../src/utils/studentImport';
@@ -53,6 +53,12 @@ interface GroupManagerProps {
     catechistIds: string[],
     students: ImportedStudent[]
   ) => Promise<void>;
+  /**
+   * El histórico completo de asistencia, todos los cursos. `students` solo
+   * trae el del curso que se está viendo, y la copia de seguridad previa a
+   * promocionar necesita el historial entero de los que se dan de baja.
+   */
+  loadFullAttendance: () => Promise<Map<string, AttendanceRecord[]>>;
 }
 
 const GroupManager: React.FC<GroupManagerProps> = ({
@@ -69,7 +75,8 @@ const GroupManager: React.FC<GroupManagerProps> = ({
   onUpdateStudent,
   onAssignCatechist,
   onPromoteYear,
-  onCreateGroupWithStudents
+  onCreateGroupWithStudents,
+  loadFullAttendance
 }) => {
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -216,6 +223,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({
           students={students}
           classDays={classDays}
           classDaysOf={classDaysOf}
+          loadFullAttendance={loadFullAttendance}
           onClose={() => setShowPromoteDialog(false)}
           onConfirm={async () => {
             await onPromoteYear();

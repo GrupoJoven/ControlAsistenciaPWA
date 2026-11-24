@@ -34,6 +34,10 @@ interface StudentListProps {
   classDaysOf: (student: Student) => string[];
   academicYear: AcademicYear;
   availableAcademicYears: AcademicYear[];
+  /** La asistencia de los cursos a exportar: en memoria solo está el curso visible. */
+  loadAttendanceForExport: (
+    years: AcademicYear[]
+  ) => Promise<Map<string, AttendanceRecord[]>>;
   /** false en cursos ya cerrados cuando el usuario no es coordinator. */
   canEditAttendance: boolean;
   /** Etiqueta del conjunto mostrado, usada al descargar el histórico completo. */
@@ -60,6 +64,7 @@ const StudentList: React.FC<StudentListProps> = ({
   classDaysOf,
   academicYear,
   availableAcademicYears,
+  loadAttendanceForExport,
   canEditAttendance,
   downloadScopeLabel,
   warningMessage,
@@ -523,6 +528,7 @@ const StudentList: React.FC<StudentListProps> = ({
             classDaysOf={classDaysOf}
             groups={groups}
             availableYears={availableAcademicYears}
+            loadAttendanceForExport={loadAttendanceForExport}
             selectedYear={academicYear}
             scopeLabel={
               filterGroupId === 'all'
@@ -872,6 +878,7 @@ const StudentList: React.FC<StudentListProps> = ({
                       classDaysOf={classDaysOf}
                       groups={groups}
                       availableYears={availableAcademicYears}
+                      loadAttendanceForExport={loadAttendanceForExport}
                       selectedYear={academicYear}
                       scopeLabel={selectedStudent.name}
                       buttonLabel="Descargar"

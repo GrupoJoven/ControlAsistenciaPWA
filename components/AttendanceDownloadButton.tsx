@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import { Download, X } from "lucide-react";
-import { Group, Student } from "../types";
+import { Download, Loader2, X } from "lucide-react";
+import { AttendanceRecord, Group, Student } from "../types";
 import { AcademicYear } from "../src/utils/academicYear";
 import {
   buildAttendanceCsv,
@@ -19,6 +19,16 @@ interface AttendanceDownloadButtonProps {
   availableYears: AcademicYear[];
   /** Curso preseleccionado en el diálogo. */
   selectedYear: AcademicYear;
+  /**
+   * La asistencia de los cursos que se van a exportar.
+   *
+   * No se usa `students[].attendanceHistory` porque ahí solo está el curso que
+   * se está viendo: exportar otro curso, o todos, daría un fichero a medias sin
+   * avisar. Se pide siempre al descargar, que es una acción deliberada.
+   */
+  loadAttendanceForExport: (
+    years: AcademicYear[]
+  ) => Promise<Map<string, AttendanceRecord[]>>;
   /** Nombre del grupo o del alumno, usado en el nombre del fichero. */
   scopeLabel: string;
   buttonLabel?: string;
@@ -43,6 +53,7 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
   groups,
   availableYears,
   selectedYear,
+  loadAttendanceForExport,
   scopeLabel,
   buttonLabel = "Descargar histórico",
   variant = "subtle",
@@ -50,10 +61,13 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [choice, setChoice] = useState<string>(selectedYear.key);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleOpen = (event: React.MouseEvent) => {
     event.stopPropagation();
     setChoice(selectedYear.key);
+    setError(null);
     setIsOpen(true);
   };
 
@@ -84,21 +98,40 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
 
   const hasData = students.length > 0 && classDayCount > 0;
 
-  const handleDownload = () => {
-    const csv = buildAttendanceCsv({
-      students,
-      classDaysOf,
-      groups,
-      years: yearsToExport,
-    });
+  const handleDownload = async () => {
+    setIsPreparing(true);
+    setError(null);
 
-    const fileName = buildAttendanceFileName(
-      scopeLabel,
-      choice === ALL_YEARS ? null : yearsToExport[0]
-    );
+    try {
+      const porAlumno = await loadAttendanceForExport(yearsToExport);
 
-    downloadCsv(fileName, csv);
-    setIsOpen(false);
+      const alumnosConHistorico = students.map((student) => ({
+        ...student,
+        attendanceHistory: porAlumno.get(student.id) ?? [],
+      }));
+
+      const csv = buildAttendanceCsv({
+        students: alumnosConHistorico,
+        classDaysOf,
+        groups,
+        years: yearsToExport,
+      });
+
+      const fileName = buildAttendanceFileName(
+        scopeLabel,
+        choice === ALL_YEARS ? null : yearsToExport[0]
+      );
+
+      downloadCsv(fileName, csv);
+      setIsOpen(false);
+    } catch (e) {
+      setError(
+        "No se pudo reunir la asistencia: " +
+          (e instanceof Error ? e.message : String(e))
+      );
+    } finally {
+      setIsPreparing(false);
+    }
   };
 
   return (
@@ -183,6 +216,12 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
                   No hay datos para el periodo seleccionado.
                 </div>
               )}
+
+              {error && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  {error}
+                </div>
+              )}
             </div>
 
             <div className="px-6 py-5 border-t border-slate-100 flex flex-col sm:flex-row gap-3 sm:justify-end">
@@ -196,16 +235,20 @@ const AttendanceDownloadButton: React.FC<AttendanceDownloadButtonProps> = ({
 
               <button
                 type="button"
-                disabled={!hasData}
-                onClick={handleDownload}
+                disabled={!hasData || isPreparing}
+                onClick={() => void handleDownload()}
                 className={`px-5 py-3 rounded-2xl font-extrabold flex items-center justify-center gap-2 ${
                   hasData
-                    ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                    ? "bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
                     : "bg-slate-200 text-slate-500 cursor-not-allowed"
                 }`}
               >
-                <Download size={18} />
-                Descargar CSV
+                {isPreparing ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Download size={18} />
+                )}
+                {isPreparing ? "Reuniendo la asistencia..." : "Descargar CSV"}
               </button>
             </div>
           </div>
