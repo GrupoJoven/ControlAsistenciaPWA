@@ -333,32 +333,92 @@ export const loadStudents = async (): Promise<Student[]> => {
   return studentsMapped;
 };
 
+// ---------------------------------------------------------------------------
+// Paginación de tablas grandes
+//
+// Supabase corta en 1000 filas por consulta, así que el histórico completo hay
+// que pedirlo a trozos. Las páginas van EN PARALELO, no en cadena: cada
+// `OFFSET` es más caro que el anterior porque Postgres recorre y descarta las
+// filas que salta, de modo que en serie el coste crecía con la tabla (medido:
+// 296, 499, 714, 1015 y 1744 ms para cinco páginas de los mismos 7 KB).
+//
+// La primera página pide además el total, que es lo que permite lanzar el resto
+// de golpe. Si por lo que sea no llega el total, se vuelve a la paginación en
+// cadena: es más lenta, pero antes eso que arriesgarse a truncar el histórico.
+// ---------------------------------------------------------------------------
+export const cargarTodasLasFilas = async (
+  table: string,
+  columns: string,
+  orderBy: string[],
+  pageSize = 1000
+): Promise<any[]> => {
+  const pagina = (from: number, conTotal = false) => {
+    let query = supabase
+      .from(table)
+      .select(columns, conTotal ? { count: "exact" } : undefined);
+
+    for (const col of orderBy) query = query.order(col, { ascending: true });
+
+    return query.range(from, from + pageSize - 1);
+  };
+
+  const { data: primeraPagina, error, count } = await pagina(0, true);
+
+  if (error) throw error;
+
+  const primera = primeraPagina ?? [];
+
+  if (primera.length < pageSize) return primera;
+
+  if (count == null) {
+    const todas: any[] = [...primera];
+    let from = pageSize;
+
+    while (true) {
+      const { data, error: errorPagina } = await pagina(from);
+
+      if (errorPagina) throw errorPagina;
+      if (!data || data.length === 0) break;
+
+      todas.push(...data);
+
+      if (data.length < pageSize) break;
+
+      from += pageSize;
+    }
+
+    return todas;
+  }
+
+  const inicios: number[] = [];
+
+  for (let from = pageSize; from < count; from += pageSize) inicios.push(from);
+
+  const siguientes = await Promise.all(
+    inicios.map(async (from) => {
+      const { data, error: errorPagina } = await pagina(from);
+
+      if (errorPagina) throw errorPagina;
+
+      return data ?? [];
+    })
+  );
+
+  // Se concatena en orden de página para no romper el orden global por el que
+  // se ha pedido, del que depende el histórico.
+  return [primera, ...siguientes].flat();
+};
+
 // Cargar asistencia de estudiantes
 export const loadAttendance = async (): Promise<Map<string, AttendanceRecord[]>> => {
   let attendanceByStudent: Map<string, AttendanceRecord[]> = new Map();
 
   try {
-    let all: any[] = [];
-    let from = 0;
-    const pageSize = 1000;
-
-    // Hacer paginación de los registros de asistencia
-    while (true) {
-      const { data, error } = await supabase
-        .from("student_attendance")
-        .select("student_id, date, catechism, mass")
-        .order("student_id", { ascending: true })
-        .order("date", { ascending: true })
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-
-      all = all.concat(data);
-      if (data.length < pageSize) break;
-
-      from += pageSize;
-    }
+    const all = await cargarTodasLasFilas(
+      "student_attendance",
+      "student_id, date, catechism, mass",
+      ["student_id", "date"]
+    );
 
     for (const record of all ?? []) {
       const attendanceRecord: AttendanceRecord = {

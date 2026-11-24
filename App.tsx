@@ -29,6 +29,7 @@ import {
   loadMonitors,
   loadMonitorActivityDays,
   loadMonitorAttendance,
+  cargarTodasLasFilas,
 
 } from "./src/app/loaders";
 
@@ -458,7 +459,58 @@ const App: React.FC = () => {
 
   const loadBaseData = async (user: User) => {
     setBaseDataLoaded(false);
-    const { groups: groupsMapped, links } = await loadGroupsAndLinks();
+
+    // Ninguna de estas cargas necesita el resultado de otra: lo que venía
+    // después solo combinaba los datos ya en memoria. Antes se encadenaban con
+    // un `await` cada una y salían 20 llamadas en serie que sumaban casi 6 s
+    // antes de pintar nada, así que se lanzan todas a la vez y se esperan donde
+    // hacen falta.
+    //
+    // Las que pueden lanzar excepción se marcan como ya gestionadas: si fallan
+    // antes de que el código llegue a su try/catch, el fallo saldría como
+    // rechazo sin gestionar. El await posterior sigue lanzando con normalidad.
+    const sinRechazoSuelto = <T,>(promesa: Promise<T>): Promise<T> => {
+      promesa.catch(() => {});
+      return promesa;
+    };
+
+    const pGruposYEnlaces = loadGroupsAndLinks();
+    const pPerfiles = loadProfiles();
+    const pAlumnos = loadStudents();
+    const pAsistenciaAlumnos = loadAttendance();
+    const pPromocion = sinRechazoSuelto(
+      Promise.resolve(
+        supabase
+          .from("academic_year_promotions")
+          .select("promoted_at")
+          .eq("academic_year_start", new Date().getFullYear())
+          .maybeSingle()
+      )
+    );
+    const pEventos = loadEvents();
+    const pDiasClase = loadClassDays();
+    const pMonitores = loadMonitors();
+    const pDiasMonitores = loadMonitorActivityDays();
+    const pAsistenciaMonitores = sinRechazoSuelto(loadMonitorAttendance());
+    const pAsistenciaCatequistasClase = sinRechazoSuelto(
+      cargarTodasLasFilas(
+        "v_catechist_attendance_norm",
+        "profile_id, date, catechism, mass",
+        ["profile_id", "date"]
+      )
+    );
+    const pAsistenciaCatequistasEventos = sinRechazoSuelto(
+      // Se cargan TODOS los registros de eventos, no solo los de hoy: el pase de
+      // lista de un evento de la agenda (y el % de asistencia) necesita los de
+      // cualquier fecha, o al refrescar parecería que nadie asistió.
+      cargarTodasLasFilas(
+        "catechist_attendance_events",
+        "profile_id, event_id, date, status",
+        ["profile_id", "event_id", "date"]
+      )
+    );
+
+    const { groups: groupsMapped, links } = await pGruposYEnlaces;
 
     setGroupCatechistLinks(links);
     setGroups(groupsMapped);
@@ -468,7 +520,7 @@ const App: React.FC = () => {
       .map(l => l.group_id);
 
     setActiveGroupId(prev => (prev && myGroupIds.includes(prev) ? prev : (myGroupIds[0] ?? null)));
-    const usersMapped = await loadProfiles();
+    const usersMapped = await pPerfiles;
 
 
     // --- lista mínima de usuarios para filtros de incidencias ---
@@ -509,8 +561,8 @@ const App: React.FC = () => {
       : usersMapped.filter(u => u.id === user.id);
 
     // --- students + student_attendance ---
-    const studentsMapped = await loadStudents();
-    const attendanceByStudent = await loadAttendance();
+    const studentsMapped = await pAlumnos;
+    const attendanceByStudent = await pAsistenciaAlumnos;
 
     // Combinar asistencia con estudiantes
     const studentsWithAttendance = studentsMapped.map((student) => ({
@@ -524,11 +576,7 @@ const App: React.FC = () => {
     // En agosto, septiembre y octubre el curso de destino es el que empieza este
     // mismo año natural, igual que calcula promote_academic_year().
     try {
-      const { data: promotionData } = await supabase
-        .from("academic_year_promotions")
-        .select("promoted_at")
-        .eq("academic_year_start", new Date().getFullYear())
-        .maybeSingle();
+      const { data: promotionData } = await pPromocion;
 
       setLastPromotionAt(promotionData?.promoted_at ?? null);
     } catch {
@@ -537,20 +585,20 @@ const App: React.FC = () => {
     }
 
     // --- parish_events ---
-    const eventsMapped = await loadEvents();
+    const eventsMapped = await pEventos;
 
     setEvents(eventsMapped);
 
     // --- class_days ---
-    setClassDaysByStage(await loadClassDays());
+    setClassDaysByStage(await pDiasClase);
 
     // --- monitores de comunión y postcomunión ---
-    const monitorsMapped = await loadMonitors();
+    const monitorsMapped = await pMonitores;
 
-    setMonitorActivityDays(await loadMonitorActivityDays());
+    setMonitorActivityDays(await pDiasMonitores);
 
     try {
-      const monitorAttendance = await loadMonitorAttendance();
+      const monitorAttendance = await pAsistenciaMonitores;
 
       setMonitors(
         monitorsMapped.map((monitor) => ({
@@ -567,45 +615,8 @@ const App: React.FC = () => {
     let usersWithAttendance: User[] = [];
 
     try {
-      // Supabase devuelve como máximo 1000 filas por consulta, así que se pagina
-      // igual que en loadAttendance: si no, el histórico quedaría cortado.
-      const fetchAllRows = async (table: string, columns: string, orderBy: string[]) => {
-        let all: any[] = [];
-        let from = 0;
-        const pageSize = 1000;
-
-        while (true) {
-          let query = supabase.from(table).select(columns);
-          for (const col of orderBy) query = query.order(col, { ascending: true });
-
-          const { data, error } = await query.range(from, from + pageSize - 1);
-
-          if (error) throw error;
-          if (!data || data.length === 0) break;
-
-          all = all.concat(data);
-          if (data.length < pageSize) break;
-
-          from += pageSize;
-        }
-
-        return all;
-      };
-
-      const catClassData = await fetchAllRows(
-        "v_catechist_attendance_norm",
-        "profile_id, date, catechism, mass",
-        ["profile_id", "date"]
-      );
-
-      // Se cargan TODOS los registros de eventos, no solo los de hoy: el pase de
-      // lista de un evento de la agenda (y el % de asistencia) necesita los de
-      // cualquier fecha, o al refrescar parecería que nadie asistió.
-      const catEventData = await fetchAllRows(
-        "catechist_attendance_events",
-        "profile_id, event_id, date, status",
-        ["profile_id", "event_id", "date"]
-      );
+      const catClassData = await pAsistenciaCatequistasClase;
+      const catEventData = await pAsistenciaCatequistasEventos;
 
       const catAttendanceByProfile = new Map<string, CatechistAttendanceRecord[]>();
 
