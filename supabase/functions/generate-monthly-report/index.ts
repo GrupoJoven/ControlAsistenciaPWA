@@ -213,6 +213,61 @@ function clampText(s: string, max = 12000) {
   return s.length <= max ? s : s.slice(0, max) + "\n[...recortado...]";
 }
 
+type AttendanceRecord = { catechism?: string | null; mass?: string | null };
+
+/** Presente entero, retraso la mitad, ausente nada. */
+function statusPoints(status: string | null | undefined): number {
+  if (status === "present") return 1;
+  if (status === "late") return 0.5;
+  return 0;
+}
+
+/**
+ * El mismo peso que calculateAttendanceWeight en types.ts: la catequesis vale
+ * 0,6 y la misa 0,4, y un retraso cuenta la mitad (0,3 y 0,2). Tiene que
+ * coincidir, porque es el porcentaje que el catequista ve en "Mis catecúmenos":
+ * si el informe lo calcula de otra manera, se contradicen.
+ */
+function attendanceWeight(record: AttendanceRecord): number {
+  return 0.6 * statusPoints(record.catechism) + 0.4 * statusPoints(record.mass);
+}
+
+/**
+ * Los porcentajes de un alumno sobre los días lectivos de su etapa, con la
+ * misma regla que calculateStudentRate: se recorren los días lectivos, y el
+ * que no tiene registro cuenta como ausencia. Dividir por los días con
+ * registro daba un 100% a quien solo había venido 3 días.
+ */
+function rateStudent(classDays: Set<string>, byDay: Map<string, AttendanceRecord>) {
+  let catPoints = 0;
+  let massPoints = 0;
+  let weight = 0;
+  let recordedDays = 0;
+
+  for (const day of classDays) {
+    const record = byDay.get(day);
+    if (!record) continue;
+
+    recordedDays += 1;
+    catPoints += statusPoints(record.catechism);
+    massPoints += statusPoints(record.mass);
+    weight += attendanceWeight(record);
+  }
+
+  const nDays = classDays.size;
+  // Sin días lectivos pasados no hay nada que medir: la app devuelve 100.
+  const pct = (value: number) =>
+    nDays === 0 ? 100 : Math.min(100, Math.max(0, Math.round((value / nDays) * 100)));
+
+  return {
+    class_days: nDays,
+    recorded_days: recordedDays,
+    cat_rate: pct(catPoints),
+    mass_rate: pct(massPoints),
+    avg_rate: pct(weight),
+  };
+}
+
 // --------------------
 // Gemini (REST) helper
 // Endpoint oficial: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=...
@@ -751,6 +806,42 @@ serve(async (req) => {
 
   const { start, end } = getAcademicYearRange(todayISO);
 
+  // Los días lectivos del curso ya pasados, por etapa (class_days_by_stage.sql).
+  // Son el denominador de TODOS los porcentajes, igual que en la app: un día
+  // lectivo sin registro de asistencia cuenta como ausencia, no se descarta.
+  const { data: classDayRows, error: cdErr } = await admin
+    .from("class_days")
+    .select("stage, date")
+    .gte("date", start)
+    .lte("date", todayISO);
+
+  if (cdErr) return serverError("Error cargando class_days.", { detail: cdErr.message });
+
+  const classDaysByStage = new Map<string, Set<string>>();
+
+  for (const row of classDayRows ?? []) {
+    const stage = String((row as any).stage);
+    const set = classDaysByStage.get(stage) ?? new Set<string>();
+    set.add(String((row as any).date).slice(0, 10));
+    classDaysByStage.set(stage, set);
+  }
+
+  /**
+   * Los días lectivos de unas etapas. Sin etapa conocida se piden los de
+   * todas, que es lo que hacen classDaysForStages y classDaysForGroup en
+   * src/utils/calendars.ts.
+   */
+  const classDaysForStages = (stages: Stage[]): Set<string> => {
+    const wanted = stages.length > 0 ? stages : ALL_STAGES;
+    const days = new Set<string>();
+
+    for (const stage of wanted) {
+      for (const day of classDaysByStage.get(stage) ?? []) days.add(day);
+    }
+
+    return days;
+  };
+
   let payload: any = null;
 
   if (reportType === "students") {
@@ -783,42 +874,65 @@ serve(async (req) => {
 
       if (attErr) return serverError("Error cargando asistencia de alumnos.", { detail: attErr.message });
 
-      // Agregar
-      const byId = new Map<string, { total: number; catP: number; massP: number }>();
+      // La etapa de cada grupo, que es la que dice qué calendario lectivo se le
+      // exige a cada niño (classDaysForStudent en src/utils/calendars.ts).
+      const { data: studGroupRows, error: studGroupsErr } = await admin
+        .from("groups")
+        .select("id, stage");
+
+      if (studGroupsErr) {
+        return serverError("Error cargando grupos.", { detail: studGroupsErr.message });
+      }
+
+      const stageByGroupId = new Map<string, Stage | null>(
+        (studGroupRows ?? []).map((g: any) => [String(g.id), (g.stage ?? null) as Stage | null])
+      );
+
+      // El registro de cada alumno, por día. student_attendance tiene clave
+      // (student_id, date), así que hay uno como máximo por día.
+      const attByStudent = new Map<string, Map<string, AttendanceRecord>>();
+
       for (const r of att ?? []) {
         const sid = String((r as any).student_id);
-        const obj = byId.get(sid) ?? { total: 0, catP: 0, massP: 0 };
-        obj.total += 1;
-        if ((r as any).catechism === "present") obj.catP += 1;
-        if ((r as any).mass === "present") obj.massP += 1;
-        byId.set(sid, obj);
+        const byDay = attByStudent.get(sid) ?? new Map<string, AttendanceRecord>();
+        byDay.set(String((r as any).date).slice(0, 10), {
+          catechism: (r as any).catechism ?? null,
+          mass: (r as any).mass ?? null,
+        });
+        attByStudent.set(sid, byDay);
       }
 
       const rows = (studs ?? []).map((s: any) => {
-        const a = byId.get(String(s.id)) ?? { total: 0, catP: 0, massP: 0 };
-        const total = a.total;
-        const catRate = total > 0 ? Math.round((a.catP / total) * 100) : 0;
-        const massRate = total > 0 ? Math.round((a.massP / total) * 100) : 0;
-        const avgRate = total > 0 ? Math.round(((a.catP + a.massP) / (2 * total)) * 100) : 0;
+        const stage = stageByGroupId.get(String(s.group_id)) ?? null;
+        const days = classDaysForStages(stage ? [stage] : []);
+        const byDay = attByStudent.get(String(s.id)) ?? new Map<string, AttendanceRecord>();
 
         return {
           id: s.id,
           name: s.name,
           school: s.school ?? "",
-          total_days: total,
-          cat_present: a.catP,
-          mass_present: a.massP,
-          cat_rate: catRate,
-          mass_rate: massRate,
-          avg_rate: avgRate,
+          ...rateStudent(days, byDay),
         };
       });
 
-      // Reducir tokens: top/bottom
-      const withEnough = rows.filter((r) => r.total_days >= 3);
-      const sorted = [...withEnough].sort((a, b) => a.avg_rate - b.avg_rate);
+      // Reducir tokens: top/bottom.
+      //
+      // Antes se descartaba a quien tuviera menos de 3 registros de asistencia,
+      // que son justo los casos peores: un niño que solo ha venido 3 días de 7
+      // se quedaba fuera del ranking o salía con un 100%. Ahora el denominador
+      // son los días lectivos del curso, el mismo para todos los de la etapa,
+      // así que entran todos.
+      const sorted = [...rows].sort((a, b) => a.avg_rate - b.avg_rate);
       const worst = sorted.slice(0, 12);
       const best = sorted.slice(-8).reverse();
+
+      const stagesInScope = ALL_STAGES.filter((stage) =>
+        (studs ?? []).some((s: any) => stageByGroupId.get(String(s.group_id)) === stage)
+      );
+
+      const studClassDaysLine = (stagesInScope.length > 0 ? stagesInScope : ALL_STAGES)
+        .map((stage) => `${STAGE_LABELS[stage]}: ${(classDaysByStage.get(stage) ?? new Set()).size}`)
+        .join(" · ");
 
       const scopeTitle =
         scope === "all_students"
@@ -831,23 +945,37 @@ serve(async (req) => {
         [
           `ÁMBITO: ${scopeTitle}`,
           `PERIODO DE DATOS: ${start} a ${todayISO}`,
+          `DÍAS LECTIVOS DEL CURSO YA PASADOS, POR ETAPA: ${studClassDaysLine}`,
           ``,
-          `NIÑOS CON MENOR COMPROMISO (ordenados por media):`,
+          `CÓMO ESTÁN CALCULADOS LOS PORCENTAJES (no los recalcules ni los`,
+          `reinterpretes, son los mismos que el catequista ve en la app):`,
+          `- El denominador son los días lectivos del curso ya pasados de la etapa`,
+          `  del niño, NO los días en los que vino. Un día lectivo sin registro de`,
+          `  asistencia cuenta como ausencia.`,
+          `- "asistió X de Y días" dice los días con registro sobre los días`,
+          `  lectivos. Venir 3 de 7 días es una media del 43%, no del 100%.`,
+          `- La media pondera catequesis 0,6 y misa 0,4, y un retraso cuenta la`,
+          `  mitad. Todos los niños de una etapa tienen el mismo denominador.`,
+          ``,
+          `NIÑOS CON MENOR COMPROMISO (ordenados por media, de peor a mejor):`,
           ...worst.map(
             (r) =>
-              `- ${r.name} (${r.school}): días=${r.total_days}, catequesis=${r.cat_rate}%, misa=${r.mass_rate}%, media=${r.avg_rate}%`
+              `- ${r.name} (${r.school}): media=${r.avg_rate}%, catequesis=${r.cat_rate}%, misa=${r.mass_rate}%, asistió ${r.recorded_days} de ${r.class_days} días lectivos`
           ),
           ``,
           `NIÑOS CON MAYOR COMPROMISO:`,
           ...best.map(
             (r) =>
-              `- ${r.name} (${r.school}): días=${r.total_days}, catequesis=${r.cat_rate}%, misa=${r.mass_rate}%, media=${r.avg_rate}%`
+              `- ${r.name} (${r.school}): media=${r.avg_rate}%, catequesis=${r.cat_rate}%, misa=${r.mass_rate}%, asistió ${r.recorded_days} de ${r.class_days} días lectivos`
           ),
           ``,
           `INSTRUCCIONES:`,
           `- Menciona nombres propios y patrones concretos.`,
           `- Evita consejos genéricos.`,
           `- Si faltan datos, dilo explícitamente.`,
+          `- Los casos preocupantes son los de media baja, que son los primeros de`,
+          `  la lista de menor compromiso. No digas que una media se basa en pocos`,
+          `  días evaluados: el denominador ya es el curso completo hasta hoy.`,
           `- Devuelve JSON con { "summary": string, "recommendations": string[] }`,
         ].join("\n"),
         14000
@@ -917,44 +1045,12 @@ serve(async (req) => {
       (c: any) => !callerStage || (stagesById.get(String(c.id)) ?? []).includes(callerStage)
     );
 
-    // class days y events del curso. De los eventos, un coordinador de etapa
-    // solo ve los suyos y los de 'all'; y a cada catequista solo se le exigen
-    // los dirigidos a él: sus etapas y cursos, o su invitación.
-    // Cada etapa lleva su calendario lectivo (class_days_by_stage.sql), así que
-    // a cada catequista solo se le exigen los días de SUS etapas: a uno de
-    // preconfirmación no se le apunta falta en un día que solo es de
+    // Los events del curso: un coordinador de etapa solo ve los suyos y los de
+    // 'all', y a cada catequista solo se le exigen los dirigidos a él (sus
+    // etapas y cursos, o su invitación). Los días lectivos salen de
+    // classDaysForStages, que a cada catequista le pide los de SUS etapas: a
+    // uno de preconfirmación no se le apunta falta en un día que solo es de
     // confirmación.
-    const { data: classDays, error: cdErr } = await admin
-      .from("class_days")
-      .select("stage, date")
-      .gte("date", start)
-      .lte("date", todayISO);
-
-    if (cdErr) return serverError("Error cargando class_days.", { detail: cdErr.message });
-
-    const classDaysByStage = new Map<string, Set<string>>();
-
-    for (const row of classDays ?? []) {
-      const stage = String((row as any).stage);
-      const set = classDaysByStage.get(stage) ?? new Set<string>();
-      set.add(String((row as any).date).slice(0, 10));
-      classDaysByStage.set(stage, set);
-    }
-
-    /** Los días lectivos de un catequista: los de todas sus etapas. */
-    const classDaysForStages = (stages: Stage[]): Set<string> => {
-      // Sin etapas calculadas se le piden los de todas, que es lo que valía
-      // cuando el calendario era uno solo.
-      const wanted = stages.length > 0 ? stages : ALL_STAGES;
-      const days = new Set<string>();
-
-      for (const stage of wanted) {
-        for (const day of classDaysByStage.get(stage) ?? []) days.add(day);
-      }
-
-      return days;
-    };
-
     let evQuery = admin
       .from("parish_events")
       .select("id, title, date, stage, grade, invite_only, counts_for_attendance")
@@ -1027,8 +1123,12 @@ serve(async (req) => {
 
     if (caeErr) return serverError("Error cargando catechist_attendance_events.", { detail: caeErr.message });
 
-    // Agregación simple: contamos asistencias "present"/"late" como asistencia.
-    const byP = new Map<string, { classAttend: number; classPossible: number; classDays: Set<string>; eventAttend: number; eventPossible: number; eventIds: Set<string> }>();
+    // Misma cuenta que calculateCatechistRate: cada día lectivo vale 1 punto
+    // (catequesis 0,6 + misa 0,4, y un retraso la mitad) y cada evento vale 1
+    // punto, que solo se gana estando presente. Antes catequesis y misa
+    // contaban media y media y un retraso valía como una presencia entera, así
+    // que el porcentaje no era el que el coordinador ve en la app.
+    const byP = new Map<string, { classPoints: number; classPossible: number; classDays: Set<string>; eventPoints: number; eventPossible: number; eventIds: Set<string> }>();
     for (const pid of catechistIds) {
       const applicable = eventsCountingFor(
         String(pid),
@@ -1037,11 +1137,11 @@ serve(async (req) => {
       const ownClassDays = classDaysForStages(stagesById.get(String(pid)) ?? []);
 
       byP.set(pid, {
-        classAttend: 0,
-        // Los días de SUS etapas, cada uno catequesis + misa.
-        classPossible: ownClassDays.size * 2,
+        classPoints: 0,
+        // Los días de SUS etapas, uno por día.
+        classPossible: ownClassDays.size,
         classDays: ownClassDays,
-        eventAttend: 0,
+        eventPoints: 0,
         eventPossible: applicable.length,
         eventIds: new Set(applicable.map((e: any) => String(e.id))),
       });
@@ -1059,10 +1159,10 @@ serve(async (req) => {
       if (!obj.classDays.has(String((r as any).date).slice(0, 10))) continue;
 
       // catechism + mass pueden estar presentes/late/absent
-      const c = (r as any).catechism;
-      const m = (r as any).mass;
-      if (c === "present" || c === "late") obj.classAttend += 1;
-      if (m === "present" || m === "late") obj.classAttend += 1;
+      obj.classPoints += attendanceWeight({
+        catechism: (r as any).catechism,
+        mass: (r as any).mass,
+      });
     }
 
     for (const r of cae ?? []) {
@@ -1073,20 +1173,23 @@ serve(async (req) => {
       // no cuenta para la asistencia no suma ni a favor ni en contra.
       if (!obj.eventIds.has(String((r as any).event_id))) continue;
 
-      const st = (r as any).status;
-      if (st === "present" || st === "late") obj.eventAttend += 1;
+      // Un evento es todo o nada: un retraso no puntúa, igual que en la app.
+      if ((r as any).status === "present") obj.eventPoints += 1;
     }
 
     const rows = (cats ?? []).map((c: any) => {
       const a = byP.get(String(c.id))!;
       const possible = a.classPossible + a.eventPossible;
-      const attended = a.classAttend + a.eventAttend;
-      const rate = possible > 0 ? Math.round((attended / possible) * 100) : 0;
+      const points = a.classPoints + a.eventPoints;
+      // Sin días ni eventos pasados no hay nada que medir: la app devuelve 100.
+      const rate = possible > 0 ? Math.round((points / possible) * 100) : 100;
       return {
         name: c.name,
         rate,
-        attended,
+        points: Math.round(points * 10) / 10,
         possible,
+        class_days: a.classPossible,
+        events: a.eventPossible,
       };
     });
 
@@ -1098,14 +1201,20 @@ serve(async (req) => {
       [
         `ÁMBITO: Equipo de catequistas${callerStage ? ` de ${STAGE_LABELS[callerStage]}` : ""}`,
         `PERIODO: ${start} a ${todayISO}`,
-        `DÍAS LECTIVOS POR ETAPA: ${classDaysLine} (cada día cuenta catequesis+misa, y a cada catequista solo se le exigen los de sus etapas)`,
+        `DÍAS LECTIVOS POR ETAPA: ${classDaysLine} (a cada catequista solo se le exigen los de sus etapas)`,
         `EVENTOS: ${nEvents} (a cada catequista solo se le cuentan los que van dirigidos a él y cuentan para la asistencia)`,
         ``,
+        `CÓMO ESTÁ CALCULADO (no lo recalcules: es el mismo porcentaje que se`,
+        `ve en la app): cada día lectivo de sus etapas vale 1 punto, con la`,
+        `catequesis valiendo 0,6 y la misa 0,4, y un retraso la mitad. Cada`,
+        `evento dirigido a él vale 1 punto, y solo se gana estando presente. Un`,
+        `día o un evento sin registro cuenta como ausencia.`,
+        ``,
         `PARTICIPACIÓN MÁS BAJA:`,
-        ...low.map((r) => `- ${r.name}: ${r.rate}% (asistencias=${r.attended}/${r.possible})`),
+        ...low.map((r) => `- ${r.name}: ${r.rate}% (${r.points} puntos de ${r.possible}: ${r.class_days} días lectivos y ${r.events} eventos suyos)`),
         ``,
         `PARTICIPACIÓN MÁS ALTA:`,
-        ...high.map((r) => `- ${r.name}: ${r.rate}% (asistencias=${r.attended}/${r.possible})`),
+        ...high.map((r) => `- ${r.name}: ${r.rate}% (${r.points} puntos de ${r.possible}: ${r.class_days} días lectivos y ${r.events} eventos suyos)`),
         ``,
         `INSTRUCCIONES:`,
         `- Valora el compromiso del equipo con tono pastoral.`,
