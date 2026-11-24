@@ -218,14 +218,94 @@ function clampText(s: string, max = 12000) {
 // Endpoint oficial: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=...
 // Docs: ai.google.dev (Generate content)
 // --------------------
-async function geminiGenerateJSON(args: {
+type ReportPayload = { summary: string; recommendations: string[] };
+
+/**
+ * Fallo al generar el informe con Gemini.
+ *
+ * Antes estos fallos se devolvían como si fueran el informe ({ summary: "Error
+ * Gemini (503)..." }), se guardaban en monthly_reports y bloqueaban el mes.
+ * Ahora se lanzan: se reintentan y, si no hay manera, la función responde con
+ * error y NO guarda nada, para que se pueda volver a pedir.
+ */
+class GeminiError extends Error {
+  readonly status: number | null;
+  readonly detail: string;
+  readonly model: string;
+  /** Si repetir la misma llamada tiene sentido (503 saturado, 5xx, red). */
+  readonly retryable: boolean;
+  /** Si merece la pena probar un modelo de reserva (404 retirado, 429 sin cuota). */
+  readonly tryNextModel: boolean;
+
+  constructor(args: {
+    message: string;
+    status: number | null;
+    detail?: string;
+    model: string;
+    retryable: boolean;
+    tryNextModel?: boolean;
+  }) {
+    super(args.message);
+    this.name = "GeminiError";
+    this.status = args.status;
+    this.detail = args.detail ?? "";
+    this.model = args.model;
+    this.retryable = args.retryable;
+    this.tryNextModel = args.tryNextModel ?? args.retryable;
+  }
+}
+
+/**
+ * Estados pasajeros: el mismo modelo puede responder bien al cabo de unos
+ * segundos. El 503 "This model is currently experiencing high demand" de
+ * Google es, de largo, el más frecuente.
+ */
+const GEMINI_RETRYABLE_STATUS = new Set([408, 425, 500, 502, 503, 504, 529]);
+
+/** Lo que un informe guardado NO puede ser: un error disfrazado de informe. */
+function isFailedReportPayload(payload: any): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  if (payload.error === true) return true;
+
+  const summary = typeof payload.summary === "string" ? payload.summary.trim() : "";
+  if (!summary) return true;
+
+  // Marcas que dejaban las versiones anteriores de esta función.
+  return /^error gemini\b/i.test(summary) || /^no se pudo (contactar|parsear)/i.test(summary);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function asGeminiError(e: unknown, model: string): GeminiError {
+  if (e instanceof GeminiError) return e;
+  return new GeminiError({
+    message: `Fallo inesperado llamando a Gemini con el modelo "${model}".`,
+    status: null,
+    detail: String((e as any)?.message ?? e),
+    model,
+    retryable: true,
+  });
+}
+
+/** Una sola llamada a Gemini. Lanza GeminiError en cuanto algo no cuadra. */
+async function geminiGenerateJSONOnce(args: {
   apiKey: string;
   model: string;
   systemInstruction: string;
   userText: string;
   temperature?: number;
-}): Promise<{ summary: string; recommendations: string[] }> {
-  const { apiKey, model, systemInstruction, userText, temperature = 0.7 } = args;
+  timeoutMs?: number;
+}): Promise<ReportPayload> {
+  const {
+    apiKey,
+    model,
+    systemInstruction,
+    userText,
+    temperature = 0.7,
+    timeoutMs = 60_000,
+  } = args;
 
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -246,58 +326,208 @@ async function geminiGenerateJSON(args: {
     },
   };
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // Sin timeout, una llamada colgada se come todo el presupuesto de la función.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    const aborted = (e as any)?.name === "AbortError";
+    throw new GeminiError({
+      message: `No se pudo contactar con Gemini (modelo "${model}").`,
+      status: null,
+      detail: aborted
+        ? `La llamada pasó de ${Math.round(timeoutMs / 1000)} s y se canceló.`
+        : String((e as any)?.message ?? e),
+      model,
+      retryable: true,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const raw = await resp.text();
+
   if (!resp.ok) {
     // 1500 caracteres: con 400 se cortaba justo antes del límite de cuota, que es
     // el dato que dice si el modelo se ha quedado sin cupo gratuito.
-    return {
-      summary:
-        `Error Gemini (${resp.status}) con el modelo "${model}". ` +
-        (raw?.slice(0, 1500) ?? "Sin detalle"),
-      recommendations:
-        resp.status === 429
-          ? [
-              `Comprueba si "${model}" conserva cuota gratuita (si el límite es 0, hay que cambiar de modelo).`,
-              "Cambia el modelo con: supabase secrets set GEMINI_MODEL=<modelo>",
-              "Revisa el consumo en ai.dev/rate-limit",
-            ]
-          : ["Intenta de nuevo más tarde", "Revisa la configuración de la IA"],
-    };
+    const retryable = GEMINI_RETRYABLE_STATUS.has(resp.status);
+    throw new GeminiError({
+      message: `Error Gemini (${resp.status}) con el modelo "${model}".`,
+      status: resp.status,
+      detail: raw?.slice(0, 1500) ?? "Sin detalle",
+      model,
+      retryable,
+      // El 429 (sin cuota) y el 404 (modelo retirado para esta clave) no se
+      // arreglan repitiendo, pero otro modelo sí puede funcionar.
+      tryNextModel: retryable || resp.status === 404 || resp.status === 429,
+    });
   }
 
   // La respuesta de Gemini suele venir en candidates[0].content.parts[0].text
   let textOut = "";
+  let envelope: any = null;
   try {
-    const j = JSON.parse(raw);
+    envelope = JSON.parse(raw);
     textOut =
-      j?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ??
+      envelope?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ??
       "";
   } catch {
     textOut = raw;
   }
 
-  // JSON mode: debería ser JSON en texto
-  try {
-    const parsed = JSON.parse(textOut);
-    return {
-      summary: String(parsed?.summary ?? ""),
-      recommendations: Array.isArray(parsed?.recommendations)
-        ? parsed.recommendations.map((x: any) => String(x))
-        : [],
-    };
-  } catch {
-    // fallback
-    return {
-      summary: textOut || "No se pudo parsear la respuesta de Gemini.",
-      recommendations: [],
-    };
+  // Un candidato cortado (MAX_TOKENS, SAFETY, RECITATION...) llega con 200 y
+  // sin texto aprovechable: es un fallo, no un informe vacío.
+  if (!textOut.trim()) {
+    throw new GeminiError({
+      message: `Gemini respondió sin contenido con el modelo "${model}".`,
+      status: resp.status,
+      detail: `finishReason: ${envelope?.candidates?.[0]?.finishReason ?? "desconocido"}`,
+      model,
+      retryable: true,
+    });
   }
+
+  // JSON mode: debería ser JSON en texto
+  let parsed: any;
+  try {
+    parsed = JSON.parse(textOut);
+  } catch {
+    throw new GeminiError({
+      message: `La respuesta de Gemini (modelo "${model}") no era JSON válido.`,
+      status: resp.status,
+      detail: textOut.slice(0, 500),
+      model,
+      retryable: true,
+    });
+  }
+
+  const summary = String(parsed?.summary ?? "").trim();
+  if (!summary) {
+    throw new GeminiError({
+      message: `Gemini (modelo "${model}") devolvió un informe sin resumen.`,
+      status: resp.status,
+      detail: textOut.slice(0, 500),
+      model,
+      retryable: true,
+    });
+  }
+
+  return {
+    summary,
+    recommendations: Array.isArray(parsed?.recommendations)
+      ? parsed.recommendations.map((x: any) => String(x))
+      : [],
+  };
+}
+
+/**
+ * Genera el informe reintentando los fallos pasajeros y, si un modelo no da
+ * servicio, pasando a los de reserva. Si no sale con ninguno, lanza el último
+ * GeminiError: quien llama responde con error y no guarda nada.
+ */
+async function geminiGenerateJSON(args: {
+  apiKey: string;
+  models: string[];
+  systemInstruction: string;
+  userText: string;
+  temperature?: number;
+  attemptsPerModel?: number;
+  /** Tope de tiempo total, para no agotar el límite de la Edge Function. */
+  budgetMs?: number;
+}): Promise<{ payload: ReportPayload; model: string; attempts: number }> {
+  const {
+    apiKey,
+    models,
+    systemInstruction,
+    userText,
+    temperature = 0.7,
+    attemptsPerModel = 3,
+    budgetMs = 75_000,
+  } = args;
+
+  const deadlineAt = Date.now() + budgetMs;
+  let lastError: GeminiError | null = null;
+  let attempts = 0;
+
+  outer:
+  for (const model of models) {
+    for (let attempt = 1; attempt <= attemptsPerModel; attempt++) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 5_000) break outer;
+
+      attempts++;
+      try {
+        const payload = await geminiGenerateJSONOnce({
+          apiKey,
+          model,
+          systemInstruction,
+          userText,
+          temperature,
+          timeoutMs: Math.min(60_000, remainingMs),
+        });
+        if (attempts > 1) {
+          console.log(`[gemini] informe generado con "${model}" en el intento ${attempts}.`);
+        }
+        return { payload, model, attempts };
+      } catch (e) {
+        const err = asGeminiError(e, model);
+        lastError = err;
+        console.error(
+          `[gemini] intento ${attempts} con "${model}" fallido: ${err.message} ${err.detail}`
+        );
+
+        // Clave o petición mal (400/401/403): ni repetir ni cambiar de modelo.
+        if (!err.retryable && !err.tryNextModel) break outer;
+        // Este modelo no va a funcionar ahora: al siguiente de la lista.
+        if (!err.retryable) break;
+        if (attempt === attemptsPerModel) break;
+
+        // Espera creciente con algo de aleatorio, para no reintentar todos a la
+        // vez contra un modelo que ya está saturado.
+        const waitMs = Math.round(1200 * Math.pow(2, attempt - 1) * (0.75 + Math.random() * 0.5));
+        if (Date.now() + waitMs >= deadlineAt) break outer;
+        await sleep(waitMs);
+      }
+    }
+  }
+
+  throw (
+    lastError ??
+    new GeminiError({
+      message: "No se pudo generar el informe con IA.",
+      status: null,
+      model: models[0] ?? "(sin modelo)",
+      retryable: true,
+    })
+  );
+}
+
+/** Respuesta cuando la IA no ha podido generar el informe. No se guarda nada. */
+function aiUnavailable(err: GeminiError) {
+  const transient = err.retryable || err.status === 429;
+  return json(
+    {
+      error: transient
+        ? "La IA de Google no está disponible en este momento. El informe no se ha guardado, " +
+          "así que puedes volver a intentarlo en unos minutos."
+        : "No se ha podido generar el informe con IA. El informe no se ha guardado.",
+      code: "AI_UNAVAILABLE",
+      detail: `${err.message} ${err.detail}`.trim(),
+      geminiStatus: err.status,
+      model: err.model,
+      retryable: transient,
+    },
+    // 503 si es cuestión de esperar; 500 si es configuración (clave, modelo).
+    transient ? 503 : 500
+  );
 }
 
 // --------------------
@@ -317,6 +547,22 @@ serve(async (req) => {
   // a claves nuevas (gemini-2.5-flash, 404). Por eso el defecto es el alias móvil,
   // que Google mantiene apuntando al flash vigente.
   const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
+
+  // Modelos de reserva, en orden, para cuando el principal no da servicio: el
+  // 503 "high demand" es de capacidad y suele afectar a un modelo concreto, así
+  // que el lite (otra reserva de capacidad) sale adelante cuando el flash no.
+  // Configurable por secret: lista separada por comas.
+  // supabase secrets set GEMINI_FALLBACK_MODELS=<modelo1,modelo2>
+  const GEMINI_FALLBACK_MODELS = (
+    Deno.env.get("GEMINI_FALLBACK_MODELS") ?? "gemini-flash-lite-latest,gemini-2.5-flash"
+  )
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+
+  const GEMINI_MODELS = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS].filter(
+    (m, i, arr) => arr.indexOf(m) === i
+  );
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return serverError("Faltan variables de entorno de Supabase (URL/ANON/SERVICE_ROLE).");
@@ -454,10 +700,21 @@ serve(async (req) => {
   if (existingErr) {
     return serverError("Error consultando informes existentes.", { detail: existingErr.message });
   }
+  // Una fila cuyo payload es en realidad un error de la IA no cuenta como
+  // informe del mes: bloqueaba la generación sin que hubiera informe. Se vuelve
+  // a generar y, si esta vez sale, se sobreescribe esa fila.
+  let failedRowId: string | null = null;
+
   if (existing) {
-    // Devuelve el existente (el cliente ya lo trata como bloqueado)
     const row = existing as MonthlyReportRow;
-    return json({ existing: true, ...row }, 200);
+    if (!isFailedReportPayload(row.payload)) {
+      // Devuelve el existente (el cliente ya lo trata como bloqueado)
+      return json({ existing: true, ...row }, 200);
+    }
+    failedRowId = row.id;
+    console.log(
+      `[informe] la fila ${row.id} (${scope}/${reportStage}/${month}) guardaba un fallo de la IA: se regenera.`
+    );
   }
 
   // ----------------------------------------------------------------------
@@ -600,16 +857,21 @@ serve(async (req) => {
         "Eres el Coordinador de Catequesis de la Parroquia San Pascual Baylón. " +
         "Redacta un informe pastoral profesional, concreto y útil para tomar decisiones.";
 
-      // Modelo (ajusta si quieres)
-      const model = GEMINI_MODEL;
-
-      payload = await geminiGenerateJSON({
-        apiKey: GEMINI_API_KEY,
-        model,
-        systemInstruction,
-        userText,
-        temperature: 0.7,
-      });
+      // Si la IA no responde, no se guarda nada: se devuelve error y el
+      // coordinador puede volver a pedir el informe.
+      try {
+        const result = await geminiGenerateJSON({
+          apiKey: GEMINI_API_KEY,
+          models: GEMINI_MODELS,
+          systemInstruction,
+          userText,
+          temperature: 0.7,
+        });
+        payload = { ...result.payload, model: result.model };
+      } catch (e) {
+        if (e instanceof GeminiError) return aiUnavailable(e);
+        throw e;
+      }
     }
   } else {
     // reportType === "catechists" (solo coordinator y scope all_catechists)
@@ -858,15 +1120,19 @@ serve(async (req) => {
       "Eres el Coordinador de Catequesis de la Parroquia San Pascual Baylón. " +
       "Redacta un informe pastoral profesional, concreto y respetuoso.";
 
-    const model = GEMINI_MODEL;
-
-    payload = await geminiGenerateJSON({
-      apiKey: GEMINI_API_KEY,
-      model,
-      systemInstruction,
-      userText,
-      temperature: 0.7,
-    });
+    try {
+      const result = await geminiGenerateJSON({
+        apiKey: GEMINI_API_KEY,
+        models: GEMINI_MODELS,
+        systemInstruction,
+        userText,
+        temperature: 0.7,
+      });
+      payload = { ...result.payload, model: result.model };
+    } catch (e) {
+      if (e instanceof GeminiError) return aiUnavailable(e);
+      throw e;
+    }
   }
 
   // Guardar en monthly_reports (service role, bypass RLS)
@@ -880,18 +1146,29 @@ serve(async (req) => {
     payload,
   };
 
-  const { data: inserted, error: insErr } = await admin
-    .from("monthly_reports")
-    .insert(insertRow)
-    .select("*")
-    .single();
+  // Si lo que había era un fallo de la IA, se reemplaza esa fila en vez de
+  // insertar otra: el unique (scope, scope_id, stage, month) solo admite una.
+  const { data: inserted, error: insErr } = failedRowId
+    ? await admin
+        .from("monthly_reports")
+        .update({ ...insertRow, generated_at: new Date().toISOString() })
+        .eq("id", failedRowId)
+        .select("*")
+        .single()
+    : await admin
+        .from("monthly_reports")
+        .insert(insertRow)
+        .select("*")
+        .single();
 
   if (insErr) {
     // Si hay carrera (dos clicks), el unique index puede disparar.
-    // En ese caso, devolvemos el existente.
+    // En ese caso, devolvemos el existente, salvo que también sea un fallo.
     if (String(insErr.message || "").toLowerCase().includes("duplicate")) {
       const { data: ex2 } = await existingQ.maybeSingle();
-      if (ex2) return json({ existing: true, ...ex2 }, 200);
+      if (ex2 && !isFailedReportPayload((ex2 as MonthlyReportRow).payload)) {
+        return json({ existing: true, ...ex2 }, 200);
+      }
     }
     return serverError("Error guardando el informe.", { detail: insErr.message });
   }

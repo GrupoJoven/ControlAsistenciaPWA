@@ -9,6 +9,7 @@ import {
   Users,
   Briefcase,
   Search,
+  AlertTriangle,
 } from "lucide-react";
 import { supabase } from "../src/lib/supabaseClient";
 import {
@@ -60,6 +61,40 @@ type MonthlyReportRow = {
   payload: any;
 };
 
+/**
+ * Un informe guardado que en realidad es un fallo de la IA. Las versiones
+ * antiguas de generate-monthly-report guardaban el error de Gemini como si
+ * fuera el informe del mes, y eso bloqueaba la generación hasta el mes
+ * siguiente sin que hubiera informe. Tiene que coincidir con
+ * isFailedReportPayload de la Edge Function.
+ */
+const isFailedReportPayload = (payload: any): boolean => {
+  if (!payload || typeof payload !== "object") return true;
+  if (payload.error === true) return true;
+
+  const summary = typeof payload.summary === "string" ? payload.summary.trim() : "";
+  if (!summary) return true;
+
+  return /^error gemini\b/i.test(summary) || /^no se pudo (contactar|parsear)/i.test(summary);
+};
+
+/**
+ * functions.invoke solo da un mensaje genérico ("non-2xx status code"): el
+ * motivo de verdad viene en el cuerpo JSON de la respuesta.
+ */
+const readInvokeErrorMessage = async (error: any): Promise<string> => {
+  try {
+    const context = error?.context;
+    const body = typeof context?.json === "function" ? await context.json() : null;
+    const message = typeof body?.error === "string" ? body.error : "";
+    const detail = typeof body?.detail === "string" ? body.detail : "";
+    if (message) return detail ? `${message}\n\nDetalle técnico: ${detail}` : message;
+  } catch {
+    // Cuerpo ilegible (o ya consumido): nos quedamos con el mensaje genérico.
+  }
+  return "No se pudo generar el informe. Vuelve a intentarlo en unos minutos.";
+};
+
 const Reports: React.FC<ReportsProps> = ({
   students,
   currentUser,
@@ -83,6 +118,8 @@ const Reports: React.FC<ReportsProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLocked, setIsLocked] = useState(false); // ya hay informe este mes para el target+tipo
   const [loadingExisting, setLoadingExisting] = useState(false);
+  // Por qué no hay informe: la IA falló o lo guardado era un error, no un informe.
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const today = getTodayStr(); // YYYY-MM-DD
   const month = today.slice(0, 7); // YYYY-MM
@@ -111,6 +148,7 @@ const Reports: React.FC<ReportsProps> = ({
       setReportRow(null);
       setReport(null);
       setIsLocked(false);
+      setAiError(null);
     }
   }, [reportType, currentUser.role]);
 
@@ -179,6 +217,7 @@ const Reports: React.FC<ReportsProps> = ({
   // --- Cargar informe existente del mes (si existe, bloquear generación) ---
   const loadExisting = async () => {
     setLoadingExisting(true);
+    setAiError(null);
     if (!isOnline) {
       setReportRow(null);
       setReport(null);
@@ -214,6 +253,19 @@ const Reports: React.FC<ReportsProps> = ({
 
       if (data) {
         const row = data as MonthlyReportRow;
+
+        // Lo guardado es un fallo de la IA, no un informe: no bloquea el mes.
+        if (isFailedReportPayload(row.payload)) {
+          setReportRow(null);
+          setReport(null);
+          setIsLocked(false);
+          setAiError(
+            "El intento de este mes guardó un error de la IA en lugar del informe, por eso aparecía " +
+              "como generado. Vuelve a pulsar «Generar Informe IA»: cuando salga bien, sustituirá a ese registro."
+          );
+          return;
+        }
+
         setReportRow(row);
         setReport(row.payload);
         setIsLocked(true);
@@ -368,6 +420,7 @@ const Reports: React.FC<ReportsProps> = ({
     }
 
     setIsGenerating(true);
+    setAiError(null);
     try {
       const body = {
         reportType,
@@ -378,21 +431,37 @@ const Reports: React.FC<ReportsProps> = ({
       const res = await supabase.functions.invoke("generate-monthly-report", { body });
 
       if (res.error) {
-        alert("No se pudo generar el informe: " + res.error.message);
-        // refresca por si realmente se generó pero el cliente no lo sabe
+        const message = await readInvokeErrorMessage(res.error);
+        // Refresca por si realmente se generó pero el cliente no lo sabe.
+        // Va antes del mensaje porque loadExisting limpia aiError.
         await loadExisting();
+        setAiError(message);
         return;
       }
 
       // La Edge Function debería devolver { payload, ... } o directamente payload
       const payload = (res.data as any)?.payload ?? res.data;
+
+      // Cinturón y tirantes: si llegara un error disfrazado de informe, no se
+      // muestra como si fuera el informe del mes.
+      if (isFailedReportPayload(payload)) {
+        await loadExisting();
+        setAiError(
+          "La IA no ha devuelto un informe válido. Vuelve a intentarlo en unos minutos."
+        );
+        return;
+      }
+
       setReport(payload);
 
       // Refresca desde BD para bloquear botón y mostrar metadatos
       await loadExisting();
     } catch (e: any) {
       console.error(e);
-      alert("Error al generar el informe.");
+      setAiError(
+        "Error al generar el informe: " + (e?.message ?? "fallo inesperado") +
+          ". No se ha guardado nada, puedes volver a intentarlo."
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -525,6 +594,8 @@ const Reports: React.FC<ReportsProps> = ({
                 ? "Ya existe un informe para este mes y este grupo."
                 : loadingExisting
                 ? "Cargando informe existente..."
+                : isGenerating
+                ? "Puede tardar un minuto: si la IA está saturada se reintenta y se prueban los modelos de reserva."
                 : undefined
             }
           >
@@ -540,6 +611,19 @@ const Reports: React.FC<ReportsProps> = ({
       {!isOnline && (
         <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
           <span className="font-bold">Modo sin conexión:</span> puedes seguir descargando el CSV con los datos ya cargados, pero no consultar informes guardados ni generar nuevos informes IA hasta que vuelva internet.
+        </div>
+      )}
+      {aiError && (
+        <div className="p-4 rounded-2xl border border-rose-200 bg-rose-50 text-rose-900 text-sm flex items-start gap-3">
+          <AlertTriangle size={20} className="shrink-0 mt-0.5 text-rose-600" />
+          <div>
+            <div className="font-bold mb-1">El informe IA no se ha generado</div>
+            <p className="whitespace-pre-wrap leading-relaxed">{aiError}</p>
+            <p className="mt-2 text-xs text-rose-800/80">
+              No se ha guardado ningún informe, así que el botón «Generar Informe IA» sigue
+              disponible: no has gastado el informe del mes.
+            </p>
+          </div>
         </div>
       )}
       {report ? (
