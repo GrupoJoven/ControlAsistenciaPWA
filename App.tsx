@@ -612,7 +612,12 @@ const App: React.FC = () => {
 
     setStudents(studentsWithAttendance);
 
-    setAttendanceRange(await pRangoAsistencia);
+    // El rango de fechas solo alimenta la lista de cursos del selector, así que
+    // NO se espera: medido en producción, esas dos consultas de una fila tardan
+    // entre 2,2 y 3,9 s (la tabla no tiene índice por fecha), y esperarlas
+    // retrasaba otro tanto el "ya está cargado" de toda la app. Mientras no
+    // llega, el selector se apaña con los días de calendario.
+    void pRangoAsistencia.then(setAttendanceRange).catch(() => {});
 
     // --- promoción de curso ya realizada ---
     // En agosto, septiembre y octubre el curso de destino es el que empieza este

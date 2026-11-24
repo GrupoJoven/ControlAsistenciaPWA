@@ -352,14 +352,18 @@ export const loadStudents = async (): Promise<Student[]> => {
 //
 // La primera página va sola y hace de sonda: si vuelve a medias, la tabla cabía
 // en una petición y no se pide nada más. Es lo que mantiene en un solo viaje a
-// las tablas pequeñas, que son la mayoría. Solo si viene llena se abre el
-// abanico y se piden lotes enteros a la vez.
+// las tablas pequeñas, que son la mayoría.
 //
-// Un lote cuya última página viene llena significa que puede haber más, así que
-// se pide otro. Subir PAGINAS_POR_LOTE cambia peticiones de sobra (baratas, no
-// devuelven nada) por menos viajes de ida y vuelta.
+// Si viene llena se abre el abanico, pero POCO A POCO: 2 páginas, luego 4,
+// luego 8. Un lote fijo y ancho se medía fatal con una tabla acotada a un
+// curso, que son una o dos páginas: pedía cinco y cuatro volvían vacías, y no
+// salían gratis porque un OFFSET alto obliga a Postgres a recorrer y descartar
+// filas igualmente (medido: ~1,2 s cada página vacía). Creciendo, el caso
+// normal son 3 peticiones en 2 viajes, y el histórico completo sigue
+// resolviéndose en 3 viajes.
 // ---------------------------------------------------------------------------
-const PAGINAS_POR_LOTE = 5;
+const PAGINAS_POR_LOTE_INICIAL = 2;
+const PAGINAS_POR_LOTE_MAXIMO = 8;
 
 export const cargarTodasLasFilas = async (
   table: string,
@@ -367,8 +371,7 @@ export const cargarTodasLasFilas = async (
   orderBy: string[],
   /** Filtros a aplicar a cada página, p. ej. acotar por fechas de un curso. */
   acotar?: (query: any) => any,
-  pageSize = 1000,
-  paginasPorLote = PAGINAS_POR_LOTE
+  pageSize = 1000
 ): Promise<any[]> => {
   const pagina = async (from: number) => {
     let query = supabase.from(table).select(columns);
@@ -390,6 +393,7 @@ export const cargarTodasLasFilas = async (
 
   const todas: any[] = [...primera];
   let desde = pageSize;
+  let paginasPorLote = PAGINAS_POR_LOTE_INICIAL;
 
   while (true) {
     const inicios: number[] = [];
@@ -407,6 +411,7 @@ export const cargarTodasLasFilas = async (
     if (lote[lote.length - 1].length < pageSize) return todas;
 
     desde += paginasPorLote * pageSize;
+    paginasPorLote = Math.min(paginasPorLote * 2, PAGINAS_POR_LOTE_MAXIMO);
   }
 };
 
