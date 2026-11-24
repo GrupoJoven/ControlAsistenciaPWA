@@ -337,76 +337,72 @@ export const loadStudents = async (): Promise<Student[]> => {
 // Paginación de tablas grandes
 //
 // Supabase corta en 1000 filas por consulta, así que el histórico completo hay
-// que pedirlo a trozos. Las páginas van EN PARALELO, no en cadena: cada
-// `OFFSET` es más caro que el anterior porque Postgres recorre y descarta las
-// filas que salta, de modo que en serie el coste crecía con la tabla (medido:
-// 296, 499, 714, 1015 y 1744 ms para cinco páginas de los mismos 7 KB).
+// que pedirlo a trozos. Los trozos van EN PARALELO, no en cadena: cada `OFFSET`
+// es más caro que el anterior porque Postgres recorre y descarta las filas que
+// salta, de modo que en serie el coste crecía con la tabla (medido: 296, 499,
+// 714, 1015 y 1744 ms para cinco páginas de los mismos 7 KB).
 //
-// La primera página pide además el total, que es lo que permite lanzar el resto
-// de golpe. Si por lo que sea no llega el total, se vuelve a la paginación en
-// cadena: es más lenta, pero antes eso que arriesgarse a truncar el histórico.
+// Las páginas se piden a lotes, sin preguntar antes cuántas hay. Pedir el total
+// con `count: "exact"` obligaba a Postgres a un COUNT(*) sobre todo el conjunto
+// y, al ir en la misma petición que la primera página, convertía esa página en
+// una barrera: las demás no salían hasta que terminaba (medido: 296 ms sin el
+// total, 1346-1668 ms con él). Sale más barato pedir alguna página de más, que
+// vuelve vacía, que preguntar cuántas son.
+//
+// La primera página va sola y hace de sonda: si vuelve a medias, la tabla cabía
+// en una petición y no se pide nada más. Es lo que mantiene en un solo viaje a
+// las tablas pequeñas, que son la mayoría. Solo si viene llena se abre el
+// abanico y se piden lotes enteros a la vez.
+//
+// Un lote cuya última página viene llena significa que puede haber más, así que
+// se pide otro. Subir PAGINAS_POR_LOTE cambia peticiones de sobra (baratas, no
+// devuelven nada) por menos viajes de ida y vuelta.
 // ---------------------------------------------------------------------------
+const PAGINAS_POR_LOTE = 5;
+
 export const cargarTodasLasFilas = async (
   table: string,
   columns: string,
   orderBy: string[],
-  pageSize = 1000
+  pageSize = 1000,
+  paginasPorLote = PAGINAS_POR_LOTE
 ): Promise<any[]> => {
-  const pagina = (from: number, conTotal = false) => {
-    let query = supabase
-      .from(table)
-      .select(columns, conTotal ? { count: "exact" } : undefined);
+  const pagina = async (from: number) => {
+    let query = supabase.from(table).select(columns);
 
     for (const col of orderBy) query = query.order(col, { ascending: true });
 
-    return query.range(from, from + pageSize - 1);
+    const { data, error } = await query.range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    return data ?? [];
   };
 
-  const { data: primeraPagina, error, count } = await pagina(0, true);
-
-  if (error) throw error;
-
-  const primera = primeraPagina ?? [];
+  const primera = await pagina(0);
 
   if (primera.length < pageSize) return primera;
 
-  if (count == null) {
-    const todas: any[] = [...primera];
-    let from = pageSize;
+  const todas: any[] = [...primera];
+  let desde = pageSize;
 
-    while (true) {
-      const { data, error: errorPagina } = await pagina(from);
+  while (true) {
+    const inicios: number[] = [];
 
-      if (errorPagina) throw errorPagina;
-      if (!data || data.length === 0) break;
+    for (let i = 0; i < paginasPorLote; i++) inicios.push(desde + i * pageSize);
 
-      todas.push(...data);
+    const lote = await Promise.all(inicios.map(pagina));
 
-      if (data.length < pageSize) break;
+    // Se recorre el lote en orden de página para no romper el orden global por
+    // el que se ha pedido, del que depende el histórico.
+    for (const paginaDelLote of lote) todas.push(...paginaDelLote);
 
-      from += pageSize;
-    }
+    // Las páginas son rangos contiguos: si la última del lote no viene llena,
+    // no hay nada más allá.
+    if (lote[lote.length - 1].length < pageSize) return todas;
 
-    return todas;
+    desde += paginasPorLote * pageSize;
   }
-
-  const inicios: number[] = [];
-
-  for (let from = pageSize; from < count; from += pageSize) inicios.push(from);
-
-  const siguientes = await Promise.all(
-    inicios.map(async (from) => {
-      const { data, error: errorPagina } = await pagina(from);
-
-      if (errorPagina) throw errorPagina;
-
-      return data ?? [];
-    })
-  );
-
-  // Se concatena en orden de página para no romper el orden global por el que
-  // se ha pedido, del que depende el histórico.
-  return [primera, ...siguientes].flat();
 };
 
 // Cargar asistencia de estudiantes
